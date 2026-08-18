@@ -1,0 +1,177 @@
+// Prisma Schema for MindsOn English Institute
+// Database: PostgreSQL with Supabase (Connection Pooling & Direct URL support)
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ------------------------------------------------------
+// ENUMS
+// ------------------------------------------------------
+
+enum AdminRole {
+  ADMIN
+  SUPERADMIN
+}
+
+enum StudentStatus {
+  ACTIVE
+  INACTIVE
+  DROPPED
+  GRADUATED
+}
+
+enum ClassModality {
+  VIRTUAL
+  PRESENCIAL
+  HIBRIDA
+}
+
+enum TuitionFeeStatus {
+  PENDING
+  PAID
+  OVERDUE
+}
+
+// ------------------------------------------------------
+// MODELS
+// ------------------------------------------------------
+
+model AdminUser {
+  id           String    @id @default(cuid())
+  name         String
+  email        String    @unique
+  passwordHash String
+  role         AdminRole @default(ADMIN)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@map("admin_users")
+}
+
+model Student {
+  id             String        @id @default(cuid())
+  ci             String        @unique
+  firstName      String
+  lastName       String
+  email          String        @unique
+  phone          String
+  guardianPhone1 String?
+  guardianPhone2 String?
+  enrollmentDate DateTime      @default(now())
+  age            Int
+  gender         String
+  address        String?
+  status         StudentStatus @default(ACTIVE)
+
+  // Relación con la clase actual asignada
+  currentClassId String?
+  currentClass   Class?        @relation(fields: [currentClassId], references: [id], onDelete: SetNull)
+
+  // Mensualidades del estudiante
+  tuitionFees    TuitionFee[]
+
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([ci])
+  @@index([status])
+  @@map("students")
+}
+
+model Teacher {
+  id               String   @id @default(cuid())
+  ci               String   @unique
+  firstName        String
+  lastName         String
+  email            String   @unique
+  phone            String
+
+  // Relaciones con clases como profesor titular o asistente
+  primaryClasses   Class[]  @relation("PrimaryTeacherClasses")
+  assistantClasses Class[]  @relation("AssistantTeacherClasses")
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([ci])
+  @@map("teachers")
+}
+
+model Class {
+  id                 String        @id @default(cuid())
+  code               String        @unique // e.g. "ENG-A1-01"
+  name               String
+  modality           ClassModality
+  schedule           String        // e.g. "Lun-Vie 18:00 - 20:00"
+  monthlyPrice       Decimal       @db.Decimal(10, 2)
+
+  // Profesor titular (obligatorio)
+  primaryTeacherId   String
+  primaryTeacher     Teacher       @relation("PrimaryTeacherClasses", fields: [primaryTeacherId], references: [id], onDelete: Restrict)
+
+  // Profesor asistente (opcional)
+  assistantTeacherId String?
+  assistantTeacher   Teacher?      @relation("AssistantTeacherClasses", fields: [assistantTeacherId], references: [id], onDelete: SetNull)
+
+  // Estudiantes inscritos en la clase
+  students           Student[]
+
+  // Mensualidades generadas para esta clase
+  tuitionFees        TuitionFee[]
+
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  @@index([primaryTeacherId])
+  @@index([assistantTeacherId])
+  @@map("classes")
+}
+
+model TuitionFee {
+  id        String           @id @default(cuid())
+  studentId String
+  student   Student          @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  classId   String
+  class     Class            @relation(fields: [classId], references: [id], onDelete: Restrict)
+  month     Int              // 1 - 12
+  year      Int              // e.g. 2026
+  dueDate   DateTime
+  amount    Decimal          @db.Decimal(10, 2)
+  status    TuitionFeeStatus @default(PENDING)
+
+  // Pagos asociados a esta mensualidad (soporta pagos parciales o único)
+  payments  Payment[]
+
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  @@unique([studentId, classId, month, year], name: "student_class_period_unique")
+  @@index([studentId])
+  @@index([classId])
+  @@index([status])
+  @@index([dueDate])
+  @@map("tuition_fees")
+}
+
+model Payment {
+  id           String     @id @default(cuid())
+  tuitionFeeId String
+  tuitionFee   TuitionFee @relation(fields: [tuitionFeeId], references: [id], onDelete: Cascade)
+  amountPaid   Decimal    @db.Decimal(10, 2)
+  paymentDate  DateTime   @default(now())
+  registeredBy String     // Nombre o identificador del usuario administrativo
+  notes        String?
+
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@index([tuitionFeeId])
+  @@map("payments")
+}
