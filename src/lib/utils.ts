@@ -55,3 +55,35 @@ export function getMonthName(monthNumber: number): string {
   ];
   return months[monthNumber - 1] || `Mes ${monthNumber}`;
 }
+
+/**
+ * Helper para asignar el libro automáticamente según el nivel del curso
+ */
+export function getBookForLevel(level: 'INTRO_A' | 'INTRO_B' | 'L1A' | 'L1B' | 'L2A' | 'L2B' | string): 'AMARILLO' | 'ROJO' | 'AZUL' {
+  if (level === 'INTRO_A' || level === 'INTRO_B') {
+    return 'AMARILLO';
+  }
+  if (level === 'L1A' || level === 'L1B') {
+    return 'ROJO';
+  }
+  return 'AZUL';
+}
+
+/**
+ * Formatea una fecha y hora a formato legible en español (DD/MM/YYYY - HH:mm)
+ */
+export function formatDateTime(date: Date | string): string {
+  const d = typeof date === 'string' ? new Date(date) : date;
+  const datePart = new Intl.DateTimeFormat('es-ES', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).format(d);
+  const timePart = new Intl.DateTimeFormat('es-ES', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(d);
+  return `${datePart} - ${timePart}`;
+}
+

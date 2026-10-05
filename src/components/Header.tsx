@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { 
   GraduationCap, 
@@ -11,7 +12,11 @@ import {
   Users, 
   BookOpen, 
   LayoutDashboard,
-  CalendarDays
+  CalendarDays,
+  Menu,
+  X,
+  Clock,
+  Layers
 } from 'lucide-react';
 import { formatDate } from '@/lib/utils';
 import { GenerateTuitionsModal } from './GenerateTuitionsModal';
@@ -20,29 +25,41 @@ export function Header() {
   const pathname = usePathname();
   const today = new Date();
   const [isGenerateModalOpen, setIsGenerateModalOpen] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const navLinks = [
     {
       href: '/',
-      label: 'Dashboard / Finanzas',
+      label: 'Cobranzas & Finanzas',
+      shortLabel: 'Cobranzas',
       icon: LayoutDashboard,
       isActive: pathname === '/',
     },
     {
       href: '/students',
       label: 'Estudiantes',
+      shortLabel: 'Estudiantes',
       icon: Users,
       isActive: pathname.startsWith('/students'),
     },
     {
       href: '/classes',
-      label: 'Clases & Horarios',
+      label: 'Cursos & Grupos',
+      shortLabel: 'Cursos',
       icon: BookOpen,
       isActive: pathname.startsWith('/classes'),
     },
     {
+      href: '/schedule',
+      label: 'Horarios & Agenda',
+      shortLabel: 'Horarios',
+      icon: Calendar,
+      isActive: pathname.startsWith('/schedule'),
+    },
+    {
       href: '/teachers',
       label: 'Docentes',
+      shortLabel: 'Docentes',
       icon: GraduationCap,
       isActive: pathname.startsWith('/teachers'),
     },
@@ -50,80 +67,169 @@ export function Header() {
 
   return (
     <>
-      <header className="sticky top-0 z-40 w-full border-b border-slate-200/50 bg-white/70 backdrop-blur-md">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6 lg:px-8">
+      <header className="sticky top-0 z-40 w-full border-b border-slate-200/60 bg-white/85 backdrop-blur-md">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-3.5 py-2.5 sm:px-6 lg:px-8">
           
-          {/* Brand & Logo */}
-          <Link href="/" className="flex items-center gap-3 group">
-            <div className="flex h-10 w-10 sm:h-11 sm:w-11 items-center justify-center rounded-xl bg-gradient-to-tr from-indigo-600 to-indigo-700 text-white shadow-md shadow-indigo-500/20 group-hover:scale-105 transition-all duration-200">
-              <GraduationCap className="h-6 w-6" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-lg sm:text-xl font-black tracking-tight text-slate-900">
-                  Minds<span className="text-indigo-600 bg-gradient-to-r from-indigo-600 to-blue-600 bg-clip-text text-transparent">On</span>
-                </span>
-                <span className="rounded-full bg-indigo-50/60 px-2 py-0.5 text-[10px] font-semibold text-indigo-700 border border-indigo-100 hidden sm:inline-block">
-                  Instituto de Inglés
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-400 font-medium hidden sm:block">
-                Gestión Académica & Cobranzas
-              </p>
+          {/* 1. Official Brand Logo */}
+          <Link href="/" className="flex items-center gap-2 group shrink-0">
+            <div className="relative h-8 sm:h-9 w-32 sm:w-40 transition-transform duration-200 group-hover:scale-[1.02]">
+              <Image
+                src="/logo.png"
+                alt="MindsOn Instituto de Inglés"
+                fill
+                className="object-contain object-left"
+                priority
+              />
             </div>
           </Link>
 
-          {/* Navigation Links */}
-          <nav className="flex items-center gap-1 rounded-2xl bg-slate-100/50 p-1 border border-slate-200/40 text-xs font-semibold text-slate-600">
+          {/* 2. Desktop Navigation Links (Visible on md+) */}
+          <nav className="hidden md:flex items-center gap-1 rounded-2xl bg-slate-100/60 p-1 border border-slate-200/50 text-xs font-semibold text-slate-600">
             {navLinks.map((link) => {
               const Icon = link.icon;
               return (
                 <Link
                   key={link.href}
                   href={link.href}
-                  className={`flex items-center gap-1.5 rounded-xl px-3.5 py-1.5 transition-all duration-200 ${
+                  className={`flex items-center gap-1.5 rounded-xl px-3 py-1.5 transition-all duration-150 ${
                     link.isActive
-                      ? 'bg-white text-indigo-600 shadow-[0_2px_8px_-1px_rgba(79,70,229,0.08)] border border-slate-200/50 font-bold scale-[1.02]'
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/30'
+                      ? 'bg-white text-indigo-600 shadow-xs border border-slate-200/60 font-bold scale-[1.01]'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/40'
                   }`}
                 >
                   <Icon className={`h-3.5 w-3.5 ${link.isActive ? 'text-indigo-600' : 'text-slate-400'}`} />
-                  <span className="hidden sm:inline">{link.label}</span>
+                  <span>{link.shortLabel}</span>
                 </Link>
               );
             })}
           </nav>
 
-          {/* Right Section: Emitir Cuotas + Perfil */}
-          <div className="flex items-center gap-2 sm:gap-3">
+          {/* 3. Right Action Controls */}
+          <div className="flex items-center gap-2 sm:gap-2.5">
             {/* Quick Action Button: Emitir Cuotas */}
             <button
               onClick={() => setIsGenerateModalOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-50/70 hover:bg-indigo-100/80 px-3.5 py-1.5 text-xs font-bold text-indigo-700 border border-indigo-200/40 transition-all duration-200 shadow-sm hover:scale-[1.02] active:scale-[0.98]"
+              className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200/70 px-3 py-1.5 text-xs font-bold transition-all shadow-2xs hover:scale-[1.02] active:scale-[0.98]"
               title="Generar masivamente las mensualidades del mes"
             >
-              <CalendarDays className="h-3.5 w-3.5 text-indigo-600" />
-              <span className="hidden md:inline">Emitir Cuotas</span>
+              <CalendarDays className="h-3.5 w-3.5 text-indigo-600 shrink-0" />
+              <span className="hidden sm:inline">Emitir Cuotas</span>
             </button>
 
-            {/* Date Badge */}
-            <div className="hidden lg:flex items-center gap-2 rounded-xl bg-slate-50/80 px-3.5 py-1.5 text-xs text-slate-600 border border-slate-200/40">
+            {/* Date Badge (Hidden on mobile) */}
+            <div className="hidden lg:flex items-center gap-1.5 rounded-xl bg-slate-50 px-3 py-1.5 text-xs text-slate-600 border border-slate-200/60 font-medium">
               <Calendar className="h-3.5 w-3.5 text-slate-400" />
-              <span className="capitalize font-medium">{formatDate(today)}</span>
+              <span className="capitalize">{formatDate(today)}</span>
             </div>
 
             {/* Admin Badge */}
-            <div className="flex items-center gap-2 rounded-xl bg-slate-900/90 hover:bg-slate-900 px-3.5 py-1.5 text-white shadow-md shadow-slate-900/10 border border-slate-800 transition-all duration-200 hover:scale-[1.02]">
-              <div className="h-2 w-2 rounded-full bg-emerald-400 glow-active" />
-              <div className="text-left hidden sm:block">
-                <p className="text-[10px] font-extrabold tracking-wider leading-none text-slate-300">ADMIN</p>
-                <p className="text-[9px] font-bold text-slate-500 tracking-tight leading-none mt-0.5">SUPERADMIN</p>
-              </div>
-              <ShieldCheck className="h-4 w-4 text-emerald-400" />
+            <div className="hidden sm:flex items-center gap-1.5 rounded-xl bg-slate-900 px-3 py-1.5 text-white shadow-xs border border-slate-800">
+              <div className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="text-[10px] font-black uppercase text-slate-300">ADMIN</span>
+              <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
             </div>
+
+            {/* Mobile Hamburger Button (Visible on < md) */}
+            <button
+              type="button"
+              onClick={() => setIsMobileMenuOpen(true)}
+              className="md:hidden flex items-center justify-center rounded-xl p-2 text-slate-600 hover:bg-slate-100 hover:text-slate-900 border border-slate-200/60 transition-colors"
+              aria-label="Abrir menú de navegación"
+            >
+              <Menu className="h-5 w-5" />
+            </button>
           </div>
         </div>
       </header>
+
+      {/* 4. Mobile Navigation Drawer / Slide-Over */}
+      {isMobileMenuOpen && (
+        <div className="fixed inset-0 z-50 md:hidden animate-in fade-in duration-200">
+          {/* Backdrop */}
+          <div 
+            className="fixed inset-0 bg-slate-950/50 backdrop-blur-xs"
+            onClick={() => setIsMobileMenuOpen(false)}
+          />
+
+          {/* Drawer Panel */}
+          <div className="fixed top-0 right-0 bottom-0 w-4/5 max-w-xs bg-white shadow-2xl p-5 flex flex-col justify-between border-l border-slate-200 animate-in slide-in-from-right duration-250">
+            
+            <div className="space-y-5">
+              {/* Drawer Header with Logo & Close */}
+              <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+                <div className="relative h-7 w-32">
+                  <Image
+                    src="/logo.png"
+                    alt="MindsOn Logo"
+                    fill
+                    className="object-contain object-left"
+                  />
+                </div>
+                <button
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  className="rounded-xl p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition-colors"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              {/* Navigation Links */}
+              <nav className="space-y-1">
+                {navLinks.map((link) => {
+                  const Icon = link.icon;
+                  return (
+                    <Link
+                      key={link.href}
+                      href={link.href}
+                      onClick={() => setIsMobileMenuOpen(false)}
+                      className={`flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-xs font-bold transition-all ${
+                        link.isActive
+                          ? 'bg-indigo-50 text-indigo-700 border border-indigo-200/80 shadow-xs'
+                          : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                      }`}
+                    >
+                      <Icon className={`h-4 w-4 ${link.isActive ? 'text-indigo-600' : 'text-slate-400'}`} />
+                      <span>{link.label}</span>
+                    </Link>
+                  );
+                })}
+              </nav>
+
+              {/* Emitir Cuotas en Drawer */}
+              <div className="pt-2">
+                <button
+                  onClick={() => {
+                    setIsMobileMenuOpen(false);
+                    setIsGenerateModalOpen(true);
+                  }}
+                  className="w-full flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-bold text-white shadow-sm shadow-indigo-600/20 hover:bg-indigo-700 active:scale-[0.98] transition-all"
+                >
+                  <CalendarDays className="h-4 w-4" />
+                  Emitir Cuotas del Periodo
+                </button>
+              </div>
+            </div>
+
+            {/* Drawer Bottom Info */}
+            <div className="border-t border-slate-100 pt-4 space-y-2">
+              <div className="flex items-center justify-between text-[11px] text-slate-500 font-medium">
+                <span className="flex items-center gap-1">
+                  <Clock className="h-3 w-3 text-slate-400" />
+                  {formatDate(today)}
+                </span>
+                <span className="flex items-center gap-1 font-bold text-slate-700">
+                  <div className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                  Admin
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-400 text-center font-medium">
+                MindsOn Instituto de Inglés • v1.0
+              </p>
+            </div>
+
+          </div>
+        </div>
+      )}
 
       {/* Modal de emisión masiva */}
       <GenerateTuitionsModal

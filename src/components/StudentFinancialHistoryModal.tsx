@@ -18,7 +18,9 @@ import {
   Loader2, 
   Sparkles,
   ShieldCheck,
-  AlertCircle
+  AlertCircle,
+  Receipt,
+  MessageCircle
 } from 'lucide-react';
 import { 
   getStudentFinancialHistory, 
@@ -26,7 +28,9 @@ import {
   SerializedTuitionFee 
 } from '@/actions/finance';
 import { formatCurrency, formatDate, getDaysDiffFromNow, getMonthName } from '@/lib/utils';
+import { buildWhatsAppUrl } from '@/lib/ecuador-validators';
 import { PaymentModal } from './PaymentModal';
+import { PaymentReceiptModal } from './PaymentReceiptModal';
 
 interface StudentFinancialHistoryModalProps {
   isOpen: boolean;
@@ -43,6 +47,7 @@ export function StudentFinancialHistoryModal({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedFeeForPayment, setSelectedFeeForPayment] = useState<SerializedTuitionFee | null>(null);
+  const [selectedReceiptId, setSelectedReceiptId] = useState<string | null>(null);
 
   const fetchHistory = async () => {
     if (!studentId) return;
@@ -133,14 +138,48 @@ export function StudentFinancialHistoryModal({
                       <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
                         <span>{historyData.student.email}</span>
                         <span>•</span>
-                        <span>{historyData.student.phone}</span>
+                        <a
+                          href={buildWhatsAppUrl(
+                            historyData.student.phone,
+                            `Hola ${historyData.student.firstName}, te escribimos de MindsOn respecto a tu estado de cuenta.`
+                          )}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 text-emerald-400 hover:text-emerald-300 font-bold"
+                        >
+                          <MessageCircle className="h-3 w-3" />
+                          {historyData.student.phone}
+                        </a>
                         {historyData.student.guardianPhone1 && (
                           <>
                             <span>•</span>
-                            <span>Tutor: {historyData.student.guardianPhone1}</span>
+                            <a
+                              href={buildWhatsAppUrl(
+                                historyData.student.guardianPhone1,
+                                `Estimado tutor de ${historyData.student.firstName}, le escribimos de MindsOn respecto al estado de cuenta.`
+                              )}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-1 text-slate-300 hover:text-emerald-400 font-medium"
+                            >
+                              <MessageCircle className="h-3 w-3 text-emerald-500" />
+                              Tutor: {historyData.student.guardianPhone1}
+                            </a>
                           </>
                         )}
                       </div>
+                      {(historyData.student.invoiceIdNumber || historyData.student.invoiceName) && (
+                        <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-amber-300/90 font-medium">
+                          <span className="rounded bg-amber-950/70 text-amber-300 px-1.5 py-0.2 text-[10px] font-bold border border-amber-800/60 font-mono">
+                            SRI: {historyData.student.invoiceIdType || 'CI'} {historyData.student.invoiceIdNumber || historyData.student.ci}
+                          </span>
+                          {historyData.student.invoiceName && (
+                            <span className="truncate max-w-[220px] text-slate-300">
+                              {historyData.student.invoiceName}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -168,6 +207,30 @@ export function StudentFinancialHistoryModal({
                     )}
                   </div>
                 </div>
+
+                {/* Banner de Discapacidad / Notas si existen */}
+                {(historyData.student.hasDisability || historyData.student.notes) && (
+                  <div className="rounded-2xl bg-slate-50 p-4 border border-slate-200/80 space-y-2 text-xs">
+                    {historyData.student.hasDisability && (
+                      <div className="flex items-start gap-2 text-rose-900 bg-rose-50/80 p-2.5 rounded-xl border border-rose-200">
+                        <span className="text-base">♿</span>
+                        <div>
+                          <p className="font-bold text-[11px]">Adaptación Pedagógica / Condición Especial:</p>
+                          <p className="text-[11px] text-rose-800 mt-0.5">{historyData.student.disabilityDescription || 'Condición especial registrada.'}</p>
+                        </div>
+                      </div>
+                    )}
+                    {historyData.student.notes && (
+                      <div className="flex items-start gap-2 text-slate-700 bg-white p-2.5 rounded-xl border border-slate-200">
+                        <span className="text-base">📝</span>
+                        <div>
+                          <p className="font-bold text-[11px] text-slate-800">Observaciones Generales:</p>
+                          <p className="text-[11px] text-slate-600 mt-0.5">{historyData.student.notes}</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* 2. Quick KPIs Grid */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -364,6 +427,11 @@ export function StudentFinancialHistoryModal({
                                         <div className="text-slate-700 font-semibold">
                                           {formatDate(lastPayment.paymentDate)}
                                         </div>
+                                        {lastPayment.invoiceNumber && (
+                                          <div className="inline-flex items-center gap-1 font-mono text-[9.5px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200/60">
+                                            SRI: {lastPayment.invoiceNumber}
+                                          </div>
+                                        )}
                                         <div className="text-[10px] text-slate-400 truncate max-w-[150px]">
                                           {lastPayment.notes || 'Comprobante archivado'}
                                         </div>
@@ -373,12 +441,17 @@ export function StudentFinancialHistoryModal({
                                     )}
                                   </td>
 
-                                  {/* Acción Cobrar */}
+                                  {/* Acción Cobrar o Ver Recibo */}
                                   <td className="px-4 py-3.5 text-right">
                                     {isPaid ? (
-                                      <span className="text-[11px] font-semibold text-emerald-600">
-                                        Completado
-                                      </span>
+                                      <button
+                                        onClick={() => setSelectedReceiptId(fee.id)}
+                                        className="inline-flex items-center gap-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 px-2.5 py-1 text-xs font-bold transition-all shadow-xs active:scale-[0.98]"
+                                        title="Ver e imprimir comprobante oficial"
+                                      >
+                                        <Receipt className="h-3.5 w-3.5 text-emerald-600" />
+                                        Recibo
+                                      </button>
                                     ) : (
                                       <button
                                         onClick={() => setSelectedFeeForPayment(fee)}
@@ -427,6 +500,13 @@ export function StudentFinancialHistoryModal({
           setSelectedFeeForPayment(null);
           fetchHistory(); // Refrescar el historial tras registrar el pago
         }}
+      />
+
+      {/* Modal de Comprobante Oficial */}
+      <PaymentReceiptModal
+        isOpen={!!selectedReceiptId}
+        paymentIdOrFeeId={selectedReceiptId}
+        onClose={() => setSelectedReceiptId(null)}
       />
     </>
   );

@@ -2,7 +2,12 @@
 
 import { revalidatePath } from 'next/cache';
 import prisma from '@/lib/prisma';
-import { ClassModality } from '@prisma/client';
+import { 
+  ClassModality, 
+  CourseBook, 
+  CourseLevel, 
+  PrivateClassStatus 
+} from '@prisma/client';
 
 export type SerializedTeacherDetailed = {
   id: string;
@@ -11,29 +16,43 @@ export type SerializedTeacherDetailed = {
   lastName: string;
   email: string;
   phone: string;
-  primaryClasses: Array<{
+  unitClasses: Array<{
     id: string;
     code: string;
     name: string;
+    level: CourseLevel;
+    book: CourseBook;
     modality: ClassModality;
-    schedule: string;
-    monthlyPrice: number;
+    classroom: string;
+    unitSchedule: string;
     studentsCount: number;
   }>;
-  assistantClasses: Array<{
+  speakingClasses: Array<{
     id: string;
     code: string;
     name: string;
+    level: CourseLevel;
+    book: CourseBook;
     modality: ClassModality;
-    schedule: string;
-    monthlyPrice: number;
+    classroom: string;
+    speakingSchedule: string;
     studentsCount: number;
+  }>;
+  privateClasses: Array<{
+    id: string;
+    studentName: string;
+    date: string;
+    startTime: string;
+    endTime: string;
+    classroom: string;
+    status: PrivateClassStatus;
+    chargeAmount: number;
   }>;
   createdAt: string;
 };
 
 /**
- * 1. Obtiene la lista completa de docentes con sus clases asignadas
+ * 1. Obtiene la lista completa de docentes con sus clases asignadas (Unit, Speaking y Privadas)
  */
 export async function getTeachersList(search?: string): Promise<SerializedTeacherDetailed[]> {
   try {
@@ -53,17 +72,24 @@ export async function getTeachersList(search?: string): Promise<SerializedTeache
     const teachers = await prisma.teacher.findMany({
       where: whereCondition,
       include: {
-        primaryClasses: {
+        unitClasses: {
           include: {
+            classroom: true,
             _count: { select: { students: true } },
           },
           orderBy: { code: 'asc' },
         },
-        assistantClasses: {
+        speakingClasses: {
           include: {
+            classroom: true,
             _count: { select: { students: true } },
           },
           orderBy: { code: 'asc' },
+        },
+        privateClasses: {
+          include: { classroom: true },
+          orderBy: { date: 'desc' },
+          take: 5,
         },
       },
       orderBy: { lastName: 'asc' },
@@ -76,23 +102,37 @@ export async function getTeachersList(search?: string): Promise<SerializedTeache
       lastName: t.lastName,
       email: t.email,
       phone: t.phone,
-      primaryClasses: t.primaryClasses.map((c) => ({
+      unitClasses: t.unitClasses.map((c) => ({
         id: c.id,
         code: c.code,
         name: c.name,
+        level: c.level,
+        book: c.book,
         modality: c.modality,
-        schedule: c.schedule,
-        monthlyPrice: Number(c.monthlyPrice),
+        classroom: c.classroom?.name || 'Aula BRAZIL',
+        unitSchedule: c.unitSchedule,
         studentsCount: c._count.students,
       })),
-      assistantClasses: t.assistantClasses.map((c) => ({
+      speakingClasses: t.speakingClasses.map((c) => ({
         id: c.id,
         code: c.code,
         name: c.name,
+        level: c.level,
+        book: c.book,
         modality: c.modality,
-        schedule: c.schedule,
-        monthlyPrice: Number(c.monthlyPrice),
+        classroom: c.classroom?.name || 'Aula VIRTUAL',
+        speakingSchedule: c.speakingSchedule,
         studentsCount: c._count.students,
+      })),
+      privateClasses: t.privateClasses.map((p) => ({
+        id: p.id,
+        studentName: p.studentName,
+        date: p.date.toISOString(),
+        startTime: p.startTime,
+        endTime: p.endTime,
+        classroom: p.classroom?.name || 'Aula BRAZIL',
+        status: p.status,
+        chargeAmount: Number(p.chargeAmount),
       })),
       createdAt: t.createdAt.toISOString(),
     }));
@@ -143,6 +183,7 @@ export async function createTeacherAction(data: {
 
     revalidatePath('/teachers');
     revalidatePath('/classes');
+    revalidatePath('/schedule');
     revalidatePath('/');
 
     return {
@@ -216,6 +257,7 @@ export async function updateTeacherAction(
 
     revalidatePath('/teachers');
     revalidatePath('/classes');
+    revalidatePath('/schedule');
     revalidatePath('/');
 
     return {
@@ -239,15 +281,19 @@ export async function deleteTeacherAction(
       return { success: false, message: 'ID de docente no proporcionado.' };
     }
 
-    // Verificar si es profesor titular de alguna clase activa
-    const primaryClassesCount = await prisma.class.count({
-      where: { primaryTeacherId: teacherId },
-    });
+    // Verificar si es profesor de Unit o Speaking de alguna clase
+    const [unitClassesCount, speakingClassesCount, privateClassesCount] = await Promise.all([
+      prisma.class.count({ where: { unitTeacherId: teacherId } }),
+      prisma.class.count({ where: { speakingTeacherId: teacherId } }),
+      prisma.privateClass.count({ where: { teacherId: teacherId } }),
+    ]);
 
-    if (primaryClassesCount > 0) {
+    const totalAssigned = unitClassesCount + speakingClassesCount + privateClassesCount;
+
+    if (totalAssigned > 0) {
       return {
         success: false,
-        message: `No se puede eliminar: el docente es titular de ${primaryClassesCount} clase(s) activa(s). Debe reasignar las clases a otro profesor antes de eliminarlo.`,
+        message: `No se puede eliminar: el docente tiene asignadas ${unitClassesCount} clase(s) de Unit, ${speakingClassesCount} clase(s) de Speaking y ${privateClassesCount} clase(s) privada(s). Debe reasignarlas antes de eliminarlo.`,
       };
     }
 
@@ -257,6 +303,7 @@ export async function deleteTeacherAction(
 
     revalidatePath('/teachers');
     revalidatePath('/classes');
+    revalidatePath('/schedule');
     revalidatePath('/');
 
     return {

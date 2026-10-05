@@ -1,22 +1,38 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useTransition } from 'react';
 import { 
   BookOpen, 
   Plus, 
   Users, 
   Calendar, 
-  DollarSign, 
   GraduationCap, 
   Globe, 
   MapPin, 
-  Sparkles,
-  Search,
-  UserCheck
+  Sparkles, 
+  Search, 
+  UserCheck, 
+  Layers, 
+  MessageSquare,
+  Edit3,
+  PauseCircle,
+  PlayCircle,
+  AlertCircle,
+  CheckCircle2,
+  Loader2,
+  Clock,
+  Building
 } from 'lucide-react';
-import { SerializedClass, SerializedTeacher } from '@/actions/academic';
-import { formatCurrency } from '@/lib/utils';
+import { 
+  SerializedClass, 
+  SerializedTeacher, 
+  pauseClassAction, 
+  resumeClassAction 
+} from '@/actions/academic';
+import { formatDate } from '@/lib/utils';
 import { CreateClassModal } from './CreateClassModal';
+import { EditClassModal } from './EditClassModal';
+import { ClassroomsModal } from './ClassroomsModal';
 
 interface ClassesViewProps {
   initialClasses: SerializedClass[];
@@ -25,7 +41,13 @@ interface ClassesViewProps {
 
 export function ClassesView({ initialClasses, teachers }: ClassesViewProps) {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isClassroomsModalOpen, setIsClassroomsModalOpen] = useState(false);
+  const [classToEdit, setClassToEdit] = useState<SerializedClass | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+
+  // Estados de pausa/reanudación
+  const [isPending, startTransition] = useTransition();
+  const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const filteredClasses = initialClasses.filter((c) => {
     if (!searchTerm.trim()) return true;
@@ -33,12 +55,58 @@ export function ClassesView({ initialClasses, teachers }: ClassesViewProps) {
     return (
       c.name.toLowerCase().includes(query) ||
       c.code.toLowerCase().includes(query) ||
-      c.primaryTeacher.firstName.toLowerCase().includes(query) ||
-      c.primaryTeacher.lastName.toLowerCase().includes(query)
+      c.level.toLowerCase().includes(query) ||
+      c.book.toLowerCase().includes(query) ||
+      c.classroom.toLowerCase().includes(query) ||
+      c.unitTeacher.firstName.toLowerCase().includes(query) ||
+      c.unitTeacher.lastName.toLowerCase().includes(query) ||
+      c.speakingTeacher.firstName.toLowerCase().includes(query) ||
+      c.speakingTeacher.lastName.toLowerCase().includes(query)
     );
   });
 
   const totalStudents = initialClasses.reduce((acc, c) => acc + c.studentsCount, 0);
+  const activeClassesCount = initialClasses.filter((c) => c.status === 'ACTIVE').length;
+  const inRecessClassesCount = initialClasses.filter((c) => c.status === 'IN_RECESS').length;
+
+  const handlePauseClass = (cls: SerializedClass) => {
+    const reason = window.prompt(
+      `¿Deseas pausar el curso "${cls.name}" (${cls.code})?\n\nAl ponerlo en receso, el ciclo contable de sus alumnos quedará congelado y no se generarán moras automáticas.\n\nIngresa el motivo del receso (opcional):`,
+      'Vacaciones de invierno / Receso pedagógico'
+    );
+
+    if (reason === null) return; // Cancelado por usuario
+
+    setActionMessage(null);
+    startTransition(async () => {
+      const res = await pauseClassAction(cls.id, reason);
+      if (res.success) {
+        setActionMessage({ type: 'success', text: res.message });
+      } else {
+        setActionMessage({ type: 'error', text: res.message });
+      }
+      setTimeout(() => setActionMessage(null), 6000);
+    });
+  };
+
+  const handleResumeClass = (cls: SerializedClass) => {
+    const confirmResume = window.confirm(
+      `¿Reactivar el curso "${cls.name}" (${cls.code})?\n\nAl reactivar la clase:\n1. El estado del curso volverá a ACTIVO.\n2. La fecha de próximo pago de todos sus alumnos activos se fijará a 1 mes a partir de hoy.\n3. Se generará su nueva cuota pendiente para el nuevo ciclo de clases.\n\n¿Deseas continuar?`
+    );
+
+    if (!confirmResume) return;
+
+    setActionMessage(null);
+    startTransition(async () => {
+      const res = await resumeClassAction(cls.id);
+      if (res.success) {
+        setActionMessage({ type: 'success', text: res.message });
+      } else {
+        setActionMessage({ type: 'error', text: res.message });
+      }
+      setTimeout(() => setActionMessage(null), 6000);
+    });
+  };
 
   return (
     <div className="space-y-6">
@@ -46,170 +114,283 @@ export function ClassesView({ initialClasses, teachers }: ClassesViewProps) {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900 bg-gradient-to-r from-slate-950 to-slate-700 bg-clip-text text-transparent">
-            Catálogo de Clases & Horarios
+            Catálogo de Cursos & Grupos
           </h1>
-          <p className="text-xs sm:text-sm text-slate-400 font-medium mt-0.5">
-            Gestión de cursos, modalidades de impartición y asignación de profesores
+          <p className="text-xs sm:text-sm text-slate-500 font-medium mt-0.5">
+            Estructura curricular, docentes duales y control de recesos / reactivación
           </p>
         </div>
 
-        <button
-          onClick={() => setIsCreateModalOpen(true)}
-          className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-700 px-4 py-2.5 text-xs font-bold text-white shadow-md shadow-indigo-600/15 hover:from-indigo-700 hover:to-indigo-850 hover:shadow-indigo-650/20 active:scale-[0.98] transition-all duration-200 self-start sm:self-auto"
-        >
-          <Plus className="h-4 w-4" />
-          Nueva Clase
-        </button>
+        <div className="flex items-center gap-2.5 flex-wrap self-start sm:self-auto">
+          <button
+            onClick={() => setIsClassroomsModalOpen(true)}
+            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs font-bold text-slate-700 shadow-xs hover:bg-slate-50 hover:text-slate-900 active:scale-95 transition-all"
+          >
+            <Building className="h-4 w-4 text-indigo-600" />
+            Gestionar Aulas
+          </button>
+
+          <button
+            onClick={() => setIsCreateModalOpen(true)}
+            className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-700 px-4.5 py-2.5 text-xs font-bold text-white shadow-md shadow-indigo-600/15 hover:from-indigo-700 hover:to-indigo-800 hover:shadow-indigo-600/20 active:scale-[0.98] transition-all duration-200"
+          >
+            <Plus className="h-4 w-4" />
+            Nueva Clase
+          </button>
+        </div>
       </div>
 
+      {/* Global Alert */}
+      {actionMessage && (
+        <div
+          className={`flex items-center gap-2 rounded-2xl p-4 text-xs font-bold border shadow-sm animate-in fade-in duration-200 ${
+            actionMessage.type === 'success'
+              ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+              : 'bg-rose-50 text-rose-800 border-rose-200'
+          }`}
+        >
+          {actionMessage.type === 'success' ? (
+            <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+          ) : (
+            <AlertCircle className="h-4 w-4 shrink-0 text-rose-600" />
+          )}
+          <span>{actionMessage.text}</span>
+        </div>
+      )}
+
       {/* Stats row */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
-        <div className="relative overflow-hidden rounded-2xl bg-white p-5 shadow-[0_4px_20px_-4px_rgba(79,70,229,0.03)] border border-slate-200/80 transition-all duration-300 hover:-translate-y-0.5">
-          <div className="absolute right-0 top-0 h-16 w-16 translate-x-4 -translate-y-4 rounded-full bg-indigo-50/50 pointer-events-none" />
+      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+        <div className="relative overflow-hidden rounded-2xl bg-white p-4 shadow-sm border border-slate-200/80">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Total Clases</span>
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-100/55">
+            <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Total Cursos</span>
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-100">
               <BookOpen className="h-4 w-4" />
             </div>
           </div>
           <p className="mt-2 text-2xl font-black text-slate-900">{initialClasses.length}</p>
+          <div className="mt-1 flex items-center gap-2 text-[11px] font-semibold text-slate-500">
+            <span className="text-emerald-700 font-bold">{activeClassesCount} activos</span>
+            {inRecessClassesCount > 0 && (
+              <span className="text-amber-700 font-bold">• {inRecessClassesCount} en receso</span>
+            )}
+          </div>
         </div>
 
-        <div className="relative overflow-hidden rounded-2xl bg-white p-5 shadow-[0_4px_20px_-4px_rgba(59,130,246,0.03)] border border-slate-200/80 transition-all duration-300 hover:-translate-y-0.5">
-          <div className="absolute right-0 top-0 h-16 w-16 translate-x-4 -translate-y-4 rounded-full bg-blue-50/50 pointer-events-none" />
+        <div className="relative overflow-hidden rounded-2xl bg-white p-4 shadow-sm border border-slate-200/80">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Alumnos Inscritos</span>
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 text-blue-700 border border-blue-100/55">
+            <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Alumnos Activos</span>
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 text-blue-700 border border-blue-100">
               <Users className="h-4 w-4" />
             </div>
           </div>
           <p className="mt-2 text-2xl font-black text-slate-900">{totalStudents}</p>
+          <p className="mt-1 text-[11px] text-slate-500 font-medium">Matriculados en grupos</p>
         </div>
 
-        <div className="relative overflow-hidden rounded-2xl bg-white p-5 shadow-[0_4px_20px_-4px_rgba(16,185,129,0.03)] border border-slate-200/80 transition-all duration-300 hover:-translate-y-0.5">
-          <div className="absolute right-0 top-0 h-16 w-16 translate-x-4 -translate-y-4 rounded-full bg-emerald-50/50 pointer-events-none" />
+        <div className="relative overflow-hidden rounded-2xl bg-white p-4 shadow-sm border border-slate-200/80">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Modalidades</span>
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-100/55">
-              <Globe className="h-4 w-4" />
+            <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Libros / Niveles</span>
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-50 text-amber-700 border border-amber-100">
+              <Layers className="h-4 w-4" />
             </div>
           </div>
-          <p className="mt-2.5 text-[11px] font-bold text-slate-700 leading-none">
-            <span className="text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-100/50">{initialClasses.filter((c) => c.modality === 'PRESENCIAL').length} Pres</span>
-            <span className="text-slate-300 px-0.5 font-medium">•</span>
-            <span className="text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-100/50">{initialClasses.filter((c) => c.modality === 'HIBRIDA').length} Híb</span>
-            <span className="text-slate-300 px-0.5 font-medium">•</span>
-            <span className="text-indigo-705 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100/50">{initialClasses.filter((c) => c.modality === 'VIRTUAL').length} Virt</span>
+          <div className="mt-2 flex items-center gap-1.5 text-xs font-bold flex-wrap">
+            <span className="bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded text-[10px]">🟡 Amarillo</span>
+            <span className="bg-rose-100 text-rose-800 px-1.5 py-0.5 rounded text-[10px]">🔴 Rojo</span>
+            <span className="bg-sky-100 text-sky-800 px-1.5 py-0.5 rounded text-[10px]">🔵 Azul</span>
+          </div>
+        </div>
+
+        <div className="relative overflow-hidden rounded-2xl bg-white p-4 shadow-sm border border-slate-200/80">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Aulas del Instituto</span>
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-100">
+              <MapPin className="h-4 w-4" />
+            </div>
+          </div>
+          <p className="mt-2 text-xs font-bold text-slate-700">
+            Brazil • Japan • Learningland • Virtual
           </p>
         </div>
       </div>
 
       {/* Search Toolbar */}
-      <div className="flex items-center justify-between rounded-2xl bg-white p-4 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.02)] border border-slate-200/80">
+      <div className="flex items-center justify-between rounded-2xl bg-white p-4 shadow-sm border border-slate-200/80">
         <div className="relative w-full sm:w-80">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input
             type="text"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Buscar por nombre, código o profesor..."
-            className="w-full rounded-xl border border-slate-250 bg-slate-50/70 py-2 pl-9 pr-4 text-xs text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:bg-white focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all duration-200"
+            placeholder="Buscar por nivel, libro, aula, profesor..."
+            className="w-full rounded-xl border border-slate-200 bg-slate-50/70 py-2 pl-9 pr-4 text-xs text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:bg-white focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all"
           />
         </div>
-        <span className="text-xs text-slate-450 font-bold hidden sm:inline">
-          {filteredClasses.length} clases encontradas
+        <span className="text-xs text-slate-400 font-bold hidden sm:inline">
+          {filteredClasses.length} cursos encontrados
         </span>
       </div>
 
       {/* Grid of Class Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {filteredClasses.map((cls) => {
-          const isVirtual = cls.modality === 'VIRTUAL';
-          const isHybrid = cls.modality === 'HIBRIDA';
+          const isAmarillo = cls.book === 'AMARILLO';
+          const isRojo = cls.book === 'ROJO';
+          const isAzul = cls.book === 'AZUL';
+          const isInRecess = cls.status === 'IN_RECESS';
+
+          const bookBorder = isInRecess
+            ? 'border-slate-300 border-2 border-dashed bg-slate-50/70 opacity-90 hover:opacity-100 shadow-sm'
+            : isAmarillo
+            ? 'border-amber-400/80 hover:border-amber-500 shadow-amber-500/5'
+            : isRojo
+            ? 'border-rose-400/80 hover:border-rose-500 shadow-rose-500/5'
+            : 'border-sky-400/80 hover:border-sky-500 shadow-sky-500/5';
 
           return (
             <div
               key={cls.id}
-              className="group relative flex flex-col justify-between overflow-hidden rounded-2xl bg-white p-6 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.02)] border border-slate-200/80 transition-all duration-300 hover:-translate-y-1.5 hover:shadow-[0_12px_30px_-4px_rgba(79,70,229,0.07)] hover:border-indigo-200"
+              className={`group relative flex flex-col justify-between overflow-hidden rounded-2xl bg-white p-6 shadow-sm border-2 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg ${bookBorder}`}
             >
               <div>
-                {/* Header */}
+                {/* Header with Level, Book & Recess Badge */}
                 <div className="flex items-start justify-between gap-2">
                   <div>
-                    <span className="font-mono text-[10px] font-black text-slate-655 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200/40">
-                      {cls.code}
-                    </span>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="font-mono text-[10px] font-black text-slate-700 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
+                        {cls.code}
+                      </span>
+                      <span className="rounded-md bg-indigo-50 px-2 py-0.5 text-[10px] font-extrabold text-indigo-700 border border-indigo-200/60">
+                        Nivel {cls.level}
+                      </span>
+                      {isInRecess && (
+                        <span className="inline-flex items-center gap-1 rounded-md bg-slate-200 px-2 py-0.5 text-[10px] font-medium text-slate-700 border border-slate-300 shadow-xs">
+                          ⏸️ En Receso
+                        </span>
+                      )}
+                    </div>
+
                     <h3 className="mt-2.5 text-base font-extrabold text-slate-900 leading-snug tracking-tight">
                       {cls.name}
                     </h3>
                   </div>
+
+                  {/* Book Tag */}
                   <span
-                    className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-0.8 text-[10px] font-black tracking-wide border ${
-                      isHybrid
-                        ? 'bg-purple-50 text-purple-700 border-purple-100'
-                        : isVirtual
-                        ? 'bg-indigo-50 text-indigo-700 border-indigo-100'
-                        : 'bg-amber-50 text-amber-700 border-amber-100'
+                    className={`inline-flex items-center gap-1 rounded-xl px-2.5 py-1 text-[10px] font-black tracking-wide border shadow-sm shrink-0 ${
+                      isAmarillo
+                        ? 'bg-amber-50 text-amber-800 border-amber-200'
+                        : isRojo
+                        ? 'bg-rose-50 text-rose-800 border-rose-200'
+                        : 'bg-sky-50 text-sky-800 border-sky-200'
                     }`}
                   >
-                    {isHybrid ? (
-                      <Sparkles className="h-3 w-3 text-purple-600" />
-                    ) : isVirtual ? (
-                      <Globe className="h-3 w-3" />
-                    ) : (
-                      <MapPin className="h-3 w-3" />
-                    )}
-                    {cls.modality === 'HIBRIDA' ? 'HÍBRIDA' : cls.modality}
+                    {isAmarillo ? '🟡 Amarillo' : isRojo ? '🔴 Rojo' : '🔵 Azul'}
                   </span>
                 </div>
 
-                {/* Details */}
-                <div className="mt-5 space-y-2.5 text-xs text-slate-600 font-medium">
-                  <div className="flex items-center gap-2">
-                    <Calendar className="h-4 w-4 text-slate-400 shrink-0" />
-                    <span className="text-slate-700">{cls.schedule}</span>
+                {/* Recess Banner if In Recess */}
+                {isInRecess && (
+                  <div className="mt-3 rounded-xl bg-slate-100/90 p-3 border border-slate-200 text-xs text-slate-700 space-y-1">
+                    <p className="font-bold flex items-center gap-1 text-slate-800">
+                      <PauseCircle className="h-3.5 w-3.5 text-slate-500" />
+                      Pausado {cls.recessStartedAt ? `desde el ${formatDate(cls.recessStartedAt)}` : 'recientemente'}
+                    </p>
+                    {cls.recessReason && (
+                      <p className="text-[11px] text-slate-600 font-medium">
+                        Motivo: {cls.recessReason}
+                      </p>
+                    )}
+                    <p className="text-[10px] text-slate-500 pt-0.5">
+                      Cobros y moras de sus alumnos pausados automáticamente.
+                    </p>
                   </div>
+                )}
 
-                  <div className="flex items-center gap-2">
-                    <UserCheck className="h-4 w-4 text-slate-400 shrink-0" />
-                    <span>
-                      Titular:{' '}
-                      <strong className="text-slate-800 font-bold pl-0.5">
-                        {cls.primaryTeacher.firstName} {cls.primaryTeacher.lastName}
-                      </strong>
-                    </span>
-                  </div>
+                {/* Aula & Modalidad */}
+                <div className="mt-3 flex items-center gap-2 flex-wrap text-xs">
+                  <span className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2 py-0.5 font-bold text-slate-700 text-[11px]">
+                    <MapPin className="h-3 w-3 text-slate-500" />
+                    Aula {cls.classroom}
+                  </span>
+                  <span className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2 py-0.5 font-semibold text-slate-600 text-[11px]">
+                    <Globe className="h-3 w-3 text-slate-500" />
+                    {cls.modality}
+                  </span>
+                </div>
 
-                  {cls.assistantTeacher && (
-                    <div className="flex items-center gap-2 text-[11px] text-slate-500 pl-0.5">
-                      <GraduationCap className="h-4 w-4 text-slate-400 shrink-0" />
-                      <span>
-                        Asistente: <strong className="text-slate-600 font-semibold">{cls.assistantTeacher.firstName} {cls.assistantTeacher.lastName}</strong>
+                {/* Teachers & Schedules breakdown */}
+                <div className="mt-4 space-y-3 rounded-xl bg-slate-50/80 p-3.5 border border-slate-100 text-xs">
+                  {/* Unit Class */}
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-[11px] font-bold text-slate-700">
+                      <span className="flex items-center gap-1">
+                        <BookOpen className="h-3.5 w-3.5 text-indigo-600" />
+                        Unit Class:
                       </span>
+                      <span className="text-slate-900">{cls.unitTeacher.firstName} {cls.unitTeacher.lastName}</span>
                     </div>
-                  )}
+                    <p className="text-[11px] text-slate-500 pl-4">{cls.unitSchedule}</p>
+                  </div>
+
+                  {/* Speaking Class */}
+                  <div className="space-y-1 pt-2 border-t border-slate-200/50">
+                    <div className="flex items-center justify-between text-[11px] font-bold text-slate-700">
+                      <span className="flex items-center gap-1">
+                        <MessageSquare className="h-3.5 w-3.5 text-blue-600" />
+                        Speaking Class:
+                      </span>
+                      <span className="text-slate-900">{cls.speakingTeacher.firstName} {cls.speakingTeacher.lastName}</span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 pl-4">{cls.speakingSchedule}</p>
+                  </div>
                 </div>
               </div>
 
-              {/* Footer / Price & Capacity */}
-              <div className="mt-6 pt-4.5 border-t border-slate-100 flex items-center justify-between">
-                <div>
-                  <span className="text-[9px] uppercase font-black text-slate-400 block tracking-wider">
-                    Precio Mensual
-                  </span>
-                  <span className="text-lg font-black text-emerald-600">
-                    {formatCurrency(cls.monthlyPrice)}
-                  </span>
-                </div>
+              {/* Footer: Students Count & Action Buttons */}
+              <div className="mt-5 pt-3.5 border-t border-slate-100 flex items-center justify-between flex-wrap gap-2">
+                <span className="inline-flex items-center gap-1 text-xs font-black text-slate-800 bg-slate-100 border border-slate-200 px-3 py-1 rounded-xl shadow-inner">
+                  <Users className="h-3.5 w-3.5 text-indigo-600" />
+                  {cls.studentsCount} {cls.studentsCount === 1 ? 'alumno' : 'alumnos'}
+                </span>
 
-                <div className="text-right">
-                  <span className="text-[9px] uppercase font-black text-slate-400 block tracking-wider">
-                    Alumnos
-                  </span>
-                  <span className="inline-flex items-center gap-1 text-xs font-black text-slate-850 bg-slate-50 border border-slate-200/60 px-2.5 py-1 rounded-xl mt-0.5 shadow-sm">
-                    <Users className="h-3.5 w-3.5 text-slate-500" />
-                    {cls.studentsCount}
-                  </span>
+                <div className="flex items-center gap-1.5">
+                  {/* Botón Pausar / Reactivar */}
+                  {isInRecess ? (
+                    <button
+                      onClick={() => handleResumeClass(cls)}
+                      disabled={isPending}
+                      className="inline-flex items-center gap-1 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 text-xs font-bold shadow-sm shadow-emerald-600/20 transition-all active:scale-[0.98] disabled:opacity-50"
+                      title="Reactivar curso y recalcular próximo cobro (+1 mes) para sus alumnos"
+                    >
+                      {isPending ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <PlayCircle className="h-3.5 w-3.5" />
+                      )}
+                      Reactivar Curso
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => handlePauseClass(cls)}
+                      disabled={isPending}
+                      className="inline-flex items-center gap-1 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200/80 px-2.5 py-1.5 text-xs font-bold transition-all active:scale-[0.98] disabled:opacity-50"
+                      title="Poner curso en receso (pausa cobros de alumnos)"
+                    >
+                      <PauseCircle className="h-3.5 w-3.5 text-amber-700" />
+                      Pausar Curso
+                    </button>
+                  )}
+
+                  {/* Botón Editar */}
+                  <button
+                    onClick={() => setClassToEdit(cls)}
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-slate-100 hover:bg-slate-200/80 px-3 py-1.5 text-xs font-bold text-slate-700 transition-all active:scale-[0.98]"
+                    title="Editar curso y horarios"
+                  >
+                    <Edit3 className="h-3.5 w-3.5" />
+                    Editar
+                  </button>
                 </div>
               </div>
             </div>
@@ -222,6 +403,20 @@ export function ClassesView({ initialClasses, teachers }: ClassesViewProps) {
         isOpen={isCreateModalOpen}
         onClose={() => setIsCreateModalOpen(false)}
         teachers={teachers}
+      />
+
+      {/* Modal Editar Clase */}
+      <EditClassModal
+        isOpen={!!classToEdit}
+        cls={classToEdit}
+        onClose={() => setClassToEdit(null)}
+        teachers={teachers}
+      />
+
+      {/* Modal Gestión de Aulas */}
+      <ClassroomsModal
+        isOpen={isClassroomsModalOpen}
+        onClose={() => setIsClassroomsModalOpen(false)}
       />
     </div>
   );

@@ -39,6 +39,57 @@ enum TuitionFeeStatus {
   OVERDUE
 }
 
+enum CourseLevel {
+  INTRO_A
+  INTRO_B
+  L1A
+  L1B
+  L2A
+  L2B
+}
+
+enum CourseBook {
+  AMARILLO
+  ROJO
+  AZUL
+}
+
+
+enum PrivateClassStatus {
+  PROGRAMADA
+  COMPLETADA
+  CANCELADA
+}
+
+enum ClassStatus {
+  ACTIVE
+  IN_RECESS
+  FINISHED
+}
+
+enum PaymentMethod {
+  CASH
+  TRANSFER
+  CARD
+  DEPOSIT
+}
+
+enum ExpenseType {
+  FIXED     // Gastos Fijos (Arriendo, Servicios básicos, Software, Limpieza)
+  VARIABLE  // Gastos Variables (Honorarios docentes, Publicidad, Material didáctico, Mantenimiento)
+}
+
+enum ExpenseCategory {
+  RENT            // Arriendo de instalaciones
+  UTILITIES       // Luz, Agua, Internet, Servicios
+  TEACHER_PAYROLL // Honorarios / Pago de Profesores
+  MARKETING       // Publicidad Digital, Pauta, Redes
+  SUPPLIES        // Material de oficina, impresiones, libros
+  SOFTWARE        // Zoom, Hosting, Licencias
+  MAINTENANCE     // Mantenimiento de aulas y equipos
+  OTHER           // Varios / Caja chica
+}
+
 // ------------------------------------------------------
 // MODELS
 // ------------------------------------------------------
@@ -55,20 +106,50 @@ model AdminUser {
   @@map("admin_users")
 }
 
+model Classroom {
+  id          String         @id @default(cuid())
+  name        String         @unique // Ej: "Aula BRAZIL", "Aula JAPAN", "Aula VIRTUAL"
+  capacity    Int            @default(15)
+  location    String?        // Ej: "Planta Principal", "Zoom Institucional"
+  isVirtual   Boolean        @default(false)
+  isActive    Boolean        @default(true)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  // Relaciones con clases/horarios
+  classes        Class[]
+  privateClasses PrivateClass[]
+
+  @@map("classrooms")
+}
+
 model Student {
-  id             String        @id @default(cuid())
-  ci             String        @unique
-  firstName      String
-  lastName       String
-  email          String        @unique
-  phone          String
-  guardianPhone1 String?
-  guardianPhone2 String?
-  enrollmentDate DateTime      @default(now())
-  age            Int
-  gender         String
-  address        String?
-  status         StudentStatus @default(ACTIVE)
+  id              String        @id @default(cuid())
+  ci              String?       @unique
+  firstName       String
+  lastName        String
+  email           String        @unique
+  phone           String
+  guardianPhone1  String?
+  guardianPhone2  String?
+  enrollmentDate  DateTime      @default(now())
+  nextPaymentDate DateTime?
+  age             Int
+  gender          String
+  address         String?
+  status          StudentStatus @default(ACTIVE)
+  monthlyFee      Decimal       @default(0.00) @db.Decimal(10, 2)
+  hasDisability   Boolean       @default(false)
+  disabilityDescription String?       @db.Text
+  notes           String?       @db.Text
+
+  // Datos para Facturación SRI (Manual)
+  invoiceIdType       String?       @default("CEDULA") // "CEDULA" | "RUC" | "PASAPORTE" | "CONSUMIDOR_FINAL"
+  invoiceIdNumber     String?       // Cédula o RUC
+  invoiceName         String?       // Razón Social / Nombres y Apellidos
+  invoiceEmail        String?       // Correo para la factura electrónica
+  invoiceAddress      String?       // Dirección domiciliaria / fiscal
+  invoicePhone        String?       // Teléfono fiscal (opcional)
 
   // Relación con la clase actual asignada
   currentClassId String?
@@ -76,6 +157,9 @@ model Student {
 
   // Mensualidades del estudiante
   tuitionFees    TuitionFee[]
+
+  // Clases privadas asociadas
+  privateClasses PrivateClass[]
 
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
@@ -86,52 +170,94 @@ model Student {
 }
 
 model Teacher {
-  id               String   @id @default(cuid())
-  ci               String   @unique
-  firstName        String
-  lastName         String
-  email            String   @unique
-  phone            String
+  id              String         @id @default(cuid())
+  ci              String         @unique
+  firstName       String
+  lastName        String
+  email           String         @unique
+  phone           String
 
-  // Relaciones con clases como profesor titular o asistente
-  primaryClasses   Class[]  @relation("PrimaryTeacherClasses")
-  assistantClasses Class[]  @relation("AssistantTeacherClasses")
+  // Relaciones con clases regulares (Unit Class y Speaking)
+  unitClasses     Class[]        @relation("UnitTeacherClasses")
+  speakingClasses Class[]        @relation("SpeakingTeacherClasses")
 
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  // Relación con clases privadas
+  privateClasses  PrivateClass[]
+
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
 
   @@index([ci])
   @@map("teachers")
 }
 
 model Class {
-  id                 String        @id @default(cuid())
-  code               String        @unique // e.g. "ENG-A1-01"
-  name               String
-  modality           ClassModality
-  schedule           String        // e.g. "Lun-Vie 18:00 - 20:00"
-  monthlyPrice       Decimal       @db.Decimal(10, 2)
+  id                String        @id @default(cuid())
+  code              String        @unique // e.g. "ENG-INTRO-A1"
+  name              String
+  level             CourseLevel
+  book              CourseBook
+  modality          ClassModality
+  classroomId       String?
+  classroom         Classroom?    @relation(fields: [classroomId], references: [id], onDelete: SetNull)
+  unitSchedule      String        // e.g. "Lunes y Miércoles 17:00 - 18:30"
+  speakingSchedule  String        // e.g. "Viernes 17:00 - 18:30 (Virtual)"
 
-  // Profesor titular (obligatorio)
-  primaryTeacherId   String
-  primaryTeacher     Teacher       @relation("PrimaryTeacherClasses", fields: [primaryTeacherId], references: [id], onDelete: Restrict)
+  // Profesor de Unit Class (obligatorio)
+  unitTeacherId     String
+  unitTeacher       Teacher       @relation("UnitTeacherClasses", fields: [unitTeacherId], references: [id], onDelete: Restrict)
 
-  // Profesor asistente (opcional)
-  assistantTeacherId String?
-  assistantTeacher   Teacher?      @relation("AssistantTeacherClasses", fields: [assistantTeacherId], references: [id], onDelete: SetNull)
+  // Profesor de Speaking (obligatorio)
+  speakingTeacherId String
+  speakingTeacher   Teacher       @relation("SpeakingTeacherClasses", fields: [speakingTeacherId], references: [id], onDelete: Restrict)
+
+  // Estado y Gestión de Receso
+  status            ClassStatus   @default(ACTIVE)
+  recessStartedAt   DateTime?
+  recessReason      String?
 
   // Estudiantes inscritos en la clase
-  students           Student[]
+  students          Student[]
 
   // Mensualidades generadas para esta clase
-  tuitionFees        TuitionFee[]
+  tuitionFees       TuitionFee[]
 
-  createdAt          DateTime      @default(now())
-  updatedAt          DateTime      @updatedAt
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
 
-  @@index([primaryTeacherId])
-  @@index([assistantTeacherId])
+  @@index([unitTeacherId])
+  @@index([speakingTeacherId])
+  @@index([level])
+  @@index([book])
+  @@index([classroomId])
+  @@index([status])
   @@map("classes")
+}
+
+model PrivateClass {
+  id           String             @id @default(cuid())
+  studentName  String
+  studentId    String?
+  student      Student?           @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  teacherId    String
+  teacher      Teacher            @relation(fields: [teacherId], references: [id], onDelete: Restrict)
+  date         DateTime
+  startTime    String             // ej: "15:00"
+  endTime      String             // ej: "16:00"
+  classroomId  String?
+  classroom    Classroom?         @relation(fields: [classroomId], references: [id], onDelete: SetNull)
+  topic        String
+  chargeAmount Decimal            @db.Decimal(10, 2)
+  status       PrivateClassStatus @default(PROGRAMADA)
+
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  @@index([teacherId])
+  @@index([studentId])
+  @@index([date])
+  @@index([classroomId])
+  @@map("private_classes")
 }
 
 model TuitionFee {
@@ -169,9 +295,55 @@ model Payment {
   registeredBy String     // Nombre o identificador del usuario administrativo
   notes        String?
 
+  // Número de Factura generado manualmente en el SRI
+  invoiceNumber String?   // Ej: 001-001-000000123
+
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
   @@index([tuitionFeeId])
+  @@index([invoiceNumber])
   @@map("payments")
+}
+
+model RecurringExpense {
+  id            String          @id @default(cuid())
+  title         String          // Ej: "Arriendo Instalaciones", "Internet Fibra Óptica"
+  amount        Float           // Monto fijo mensual en USD
+  category      ExpenseCategory // RENT, UTILITIES, SOFTWARE, etc.
+  dayOfMonth    Int             @default(1) // Día del mes en que se ejecuta (1-31)
+  paymentMethod PaymentMethod   @default(TRANSFER)
+  supplier      String?         // Ej: "Inmobiliaria Quito", "CNT"
+  notes         String?
+  isActive      Boolean         @default(true) // Permite pausar el gasto recurrente sin borrarlo
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  // Gastos individuales generados a partir de esta plantilla
+  expenses      Expense[]
+
+  @@map("recurring_expenses")
+}
+
+model Expense {
+  id                 String            @id @default(cuid())
+  title              String            // Descripción o concepto del gasto
+  amount             Float             // Monto en USD
+  type               ExpenseType       // FIXED | VARIABLE
+  category           ExpenseCategory
+  expenseDate        DateTime          // Fecha de desembolso
+  paymentMethod      PaymentMethod     // CASH | TRANSFER | CARD | DEPOSIT
+  invoiceNumber      String?           // Nº de Factura, Nota de Venta o Recibo físico
+  supplier           String?           // Proveedor o Beneficiario (ej. "CNT", "Inmobiliaria", "Prof. Carlos")
+  notes              String?           // Observaciones adicionales
+  recurringExpenseId String?
+  recurringExpense   RecurringExpense? @relation(fields: [recurringExpenseId], references: [id], onDelete: SetNull)
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  @@index([expenseDate])
+  @@index([category])
+  @@index([type])
+  @@index([recurringExpenseId])
+  @@map("expenses")
 }

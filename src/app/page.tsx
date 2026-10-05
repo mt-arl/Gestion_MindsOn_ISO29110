@@ -2,7 +2,13 @@ import React from 'react';
 import { Header } from '@/components/Header';
 import { MetricCards } from '@/components/MetricCards';
 import { TuitionControlSection } from '@/components/TuitionControlSection';
-import { getFinancialDashboardData } from '@/actions/finance';
+import { 
+  getFinancialDashboardData, 
+  getCourseFinanceBreakdownAction,
+  getMonthlyCollectionHistoryAction,
+  getAnnualCashflowSummaryAction
+} from '@/actions/finance';
+import { getMonthlyFinancialBalanceAction } from '@/actions/expenses';
 import { 
   AlertOctagon, 
   TrendingUp, 
@@ -17,7 +23,21 @@ import { formatCurrency } from '@/lib/utils';
 export const dynamic = 'force-dynamic';
 
 export default async function DashboardPage() {
-  const { metrics, fees } = await getFinancialDashboardData();
+  const [
+    dashboardData, 
+    courseBreakdownData, 
+    monthlyHistoryData, 
+    annualCashflowData,
+    financialBalanceData
+  ] = await Promise.all([
+    getFinancialDashboardData(),
+    getCourseFinanceBreakdownAction(),
+    getMonthlyCollectionHistoryAction(),
+    getAnnualCashflowSummaryAction(),
+    getMonthlyFinancialBalanceAction(),
+  ]);
+
+  const { metrics, fees } = dashboardData;
 
   return (
     <div className="min-h-screen bg-slate-50/50 pb-16">
@@ -34,7 +54,7 @@ export default async function DashboardPage() {
               Panel de Control Financiero & Cobranzas
             </h1>
             <p className="text-xs text-slate-400 sm:text-sm font-medium">
-              Supervisión de mensualidades, detección automática de morosidad y registro ágil de pagos.
+              Supervisión de mensualidades, desglose de recaudación por curso y registro ágil de pagos.
             </p>
           </div>
 
@@ -77,19 +97,13 @@ export default async function DashboardPage() {
 
         {/* Sección de Control de Mensualidades y Cobranzas */}
         <section aria-label="Control de Pagos y Mensualidades" className="space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Layers className="h-4 w-4 text-slate-500" />
-              <h2 className="text-base font-extrabold text-slate-800 tracking-tight">
-                Control de Mensualidades & Alertas
-              </h2>
-            </div>
-            <span className="text-xs text-slate-400 font-medium">
-              Mostrando {fees.length} registros
-            </span>
-          </div>
-
-          <TuitionControlSection initialFees={fees} />
+          <TuitionControlSection 
+            initialFees={fees} 
+            courseBreakdownData={courseBreakdownData} 
+            initialMonthlyHistoryData={monthlyHistoryData}
+            initialAnnualCashflowData={annualCashflowData}
+            initialFinancialBalanceData={financialBalanceData}
+          />
         </section>
       </main>
     </div>
