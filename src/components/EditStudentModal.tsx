@@ -15,7 +15,8 @@ import {
   Calendar,
   Landmark,
   Copy,
-  CheckCheck
+  CheckCheck,
+  RotateCcw
 } from 'lucide-react';
 import { updateStudentAction, SerializedStudent, SerializedClass } from '@/actions/academic';
 import { StudentStatus } from '@prisma/client';
@@ -51,6 +52,38 @@ export function EditStudentModal({ isOpen, onClose, student, classes }: EditStud
   const [hasDisability, setHasDisability] = useState(false);
   const [disabilityDescription, setDisabilityDescription] = useState('');
   const [notes, setNotes] = useState('');
+
+  // Modificación de fecha de próximo pago / vencimiento
+  const [customDateEnabled, setCustomDateEnabled] = useState(false);
+  const [paymentDate, setPaymentDate] = useState('');
+
+  const getSystemDefaultDate = (s: SerializedStudent): string => {
+    const base = s.enrollmentDate ? new Date(s.enrollmentDate) : new Date();
+    const cutoffDay = isNaN(base.getDate()) ? 1 : base.getDate();
+    const now = new Date();
+    let year = now.getFullYear();
+    let month = now.getMonth();
+
+    const maxDaysCurrent = new Date(year, month + 1, 0).getDate();
+    const dayCurrent = Math.min(cutoffDay, maxDaysCurrent);
+    let target = new Date(year, month, dayCurrent, 12, 0, 0);
+
+    if (target < now) {
+      month += 1;
+      const maxDaysNext = new Date(year, month + 1, 0).getDate();
+      const dayNext = Math.min(cutoffDay, maxDaysNext);
+      target = new Date(year, month, dayNext, 12, 0, 0);
+    }
+    const y = target.getFullYear();
+    const m = String(target.getMonth() + 1).padStart(2, '0');
+    const day = String(target.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
+  const handleResetToDefaultDate = () => {
+    if (!student) return;
+    setPaymentDate(getSystemDefaultDate(student));
+  };
 
   // Datos para Facturación SRI
   const [invoiceIdType, setInvoiceIdType] = useState('CEDULA');
@@ -96,6 +129,18 @@ export function EditStudentModal({ isOpen, onClose, student, classes }: EditStud
       setInvoiceEmail(student.invoiceEmail || '');
       setInvoiceAddress(student.invoiceAddress || '');
       setInvoicePhone(student.invoicePhone || '');
+      
+      if (student.nextPaymentDate) {
+        const d = new Date(student.nextPaymentDate);
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        setPaymentDate(`${y}-${m}-${day}`);
+      } else {
+        setPaymentDate(getSystemDefaultDate(student));
+      }
+      setCustomDateEnabled(false);
+
       setError(null);
       setSuccessMsg(null);
     }
@@ -128,6 +173,7 @@ export function EditStudentModal({ isOpen, onClose, student, classes }: EditStud
     if (guardianPhone2 && !guardian2Validation.isValid) return false;
     if (hasDisability && !disabilityDescription.trim()) return false;
     if (Number(monthlyFee) < 0 || isNaN(Number(monthlyFee))) return false;
+    if (customDateEnabled && !paymentDate) return false;
     return true;
   }, [
     ci,
@@ -143,6 +189,8 @@ export function EditStudentModal({ isOpen, onClose, student, classes }: EditStud
     hasDisability,
     disabilityDescription,
     monthlyFee,
+    customDateEnabled,
+    paymentDate,
   ]);
 
   if (!isOpen || !student) return null;
@@ -201,6 +249,7 @@ export function EditStudentModal({ isOpen, onClose, student, classes }: EditStud
         invoiceAddress: invoiceAddress.trim() || null,
         invoicePhone: invoicePhone.trim() || null,
         currentClassId: currentClassId || null,
+        customNextPaymentDate: customDateEnabled ? paymentDate : undefined,
       });
 
       if (res.success) {
@@ -538,6 +587,55 @@ export function EditStudentModal({ isOpen, onClose, student, classes }: EditStud
                   />
                 </div>
               </div>
+            </div>
+
+            {/* Control de Fecha de Próximo Pago / Vencimiento */}
+            <div className="pt-1">
+              <label className="inline-flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={customDateEnabled}
+                  onChange={(e) => setCustomDateEnabled(e.target.checked)}
+                  className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 transition-colors"
+                />
+                <span className="text-xs font-bold text-slate-700 hover:text-slate-900 transition-colors">
+                  Modificar fecha de vencimiento / próximo pago
+                </span>
+              </label>
+
+              {customDateEnabled && (
+                <div className="mt-2.5 p-3.5 rounded-xl bg-indigo-50/50 border border-indigo-100/80 animate-in fade-in duration-150 space-y-2">
+                  <div className="flex flex-col sm:flex-row sm:items-end gap-2.5">
+                    <div className="flex-1">
+                      <label className="block text-xs font-semibold text-indigo-950 mb-1.5 flex items-center gap-1.5">
+                        <Calendar className="h-3.5 w-3.5 text-indigo-600" />
+                        Fecha de Vencimiento de la Cuota Pendiente
+                      </label>
+                      <input
+                        type="date"
+                        required={customDateEnabled}
+                        value={paymentDate}
+                        onChange={(e) => setPaymentDate(e.target.value)}
+                        className="w-full rounded-xl border border-indigo-200 bg-white px-3 py-2 text-xs font-bold text-slate-800 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 shadow-2xs"
+                      />
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleResetToDefaultDate}
+                      className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-white hover:bg-indigo-100/70 text-indigo-700 border border-indigo-200 px-3 py-2 text-xs font-bold transition-all shadow-2xs active:scale-95 shrink-0"
+                      title="Calcular automáticamente la fecha del ciclo mensual a partir de la matrícula del estudiante"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5 text-indigo-600" />
+                      <span>Restablecer a fecha por defecto del sistema</span>
+                    </button>
+                  </div>
+
+                  <p className="text-[11px] text-indigo-700/80 font-medium">
+                    Puedes fijar una nueva fecha de vencimiento o presionar &ldquo;Restablecer&rdquo; para volver al ciclo mensual automático.
+                  </p>
+                </div>
+              )}
             </div>
           </div>
 

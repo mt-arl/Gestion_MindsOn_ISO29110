@@ -12,10 +12,12 @@ import {
   CheckCircle2, 
   XCircle, 
   Loader2, 
-  AlertCircle 
+  AlertCircle,
+  BookOpen
 } from 'lucide-react';
 import { PrivateClassSchedule, updatePrivateClassStatusAction } from '@/actions/schedule';
 import { formatCurrency, formatDate } from '@/lib/utils';
+import { getBookColorStyles } from '@/lib/book-colors';
 import { PrivateClassStatus } from '@prisma/client';
 
 interface PrivateClassDetailsModalProps {
@@ -121,6 +123,22 @@ export function PrivateClassDetailsModal({
               </span>
               <strong className="text-slate-900 font-bold">Aula {privateClass.classroom}</strong>
             </div>
+
+            {privateClass.bookRef && (() => {
+              const bookStyles = getBookColorStyles(privateClass.bookRef.colorTheme);
+              return (
+                <div className="flex items-center justify-between pt-1 border-t border-slate-200/60">
+                  <span className="text-slate-500 font-semibold flex items-center gap-1">
+                    <BookOpen className="h-3.5 w-3.5 text-purple-600" />
+                    Libro / Material:
+                  </span>
+                  <span className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-0.5 text-xs font-bold border shadow-xs ${bookStyles.badge}`}>
+                    <span className={`h-2 w-2 rounded-full ${bookStyles.indicator}`} />
+                    {privateClass.bookRef.name}
+                  </span>
+                </div>
+              );
+            })()}
           </div>
 
           {/* Tema / Observaciones */}

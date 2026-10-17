@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { updateClassAction, SerializedClass, SerializedTeacher } from '@/actions/academic';
 import { getClassroomsAction, SerializedClassroom } from '@/actions/classrooms';
+import { getBooksAction, SerializedBook } from '@/actions/books';
 import { getBookForLevel } from '@/lib/utils';
 import { 
   ClassModality, 
@@ -67,6 +68,9 @@ export function EditClassModal({ isOpen, onClose, cls, teachers }: EditClassModa
   const [classrooms, setClassrooms] = useState<SerializedClassroom[]>([]);
   const [selectedClassroomId, setSelectedClassroomId] = useState<string>('');
 
+  const [books, setBooks] = useState<SerializedBook[]>([]);
+  const [selectedBookId, setSelectedBookId] = useState<string>('');
+
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
   const [level, setLevel] = useState<CourseLevel>(CourseLevel.INTRO_A);
@@ -99,6 +103,20 @@ export function EditClassModal({ isOpen, onClose, cls, teachers }: EditClassModa
           }
         }
       });
+      getBooksAction(false).then((data) => {
+        setBooks(data);
+        if (cls) {
+          if (cls.bookId) {
+            setSelectedBookId(cls.bookId);
+          } else {
+            const match = data.find((b) =>
+              b.shortName.toLowerCase().includes(cls.book.toLowerCase()) ||
+              b.name.toLowerCase().includes(cls.book.toLowerCase())
+            );
+            if (match) setSelectedBookId(match.id);
+          }
+        }
+      });
     }
   }, [isOpen, cls]);
 
@@ -108,6 +126,15 @@ export function EditClassModal({ isOpen, onClose, cls, teachers }: EditClassModa
       setName(cls.name || '');
       setLevel(cls.level as CourseLevel || CourseLevel.INTRO_A);
       setBook(cls.book as CourseBook || CourseBook.AMARILLO);
+      if (cls.bookId) {
+        setSelectedBookId(cls.bookId);
+      } else if (books.length > 0) {
+        const match = books.find((b) =>
+          b.shortName.toLowerCase().includes(cls.book.toLowerCase()) ||
+          b.name.toLowerCase().includes(cls.book.toLowerCase())
+        );
+        if (match) setSelectedBookId(match.id);
+      }
       setModality(cls.modality as ClassModality || ClassModality.PRESENCIAL);
       if (cls.classroomId) {
         setSelectedClassroomId(cls.classroomId);
@@ -120,7 +147,7 @@ export function EditClassModal({ isOpen, onClose, cls, teachers }: EditClassModa
       setUnitStartTime(parsedUnit.startTime);
       setUnitEndTime(parsedUnit.endTime);
 
-      const parsedSpeaking = parseScheduleString(cls.speakingSchedule, ['Viernes']);
+      const parsedSpeaking = parseScheduleString(cls.speakingSchedule || undefined, ['Viernes']);
       setSpeakingDays(parsedSpeaking.days);
       setSpeakingStartTime(parsedSpeaking.startTime);
       setSpeakingEndTime(parsedSpeaking.endTime);
@@ -128,7 +155,7 @@ export function EditClassModal({ isOpen, onClose, cls, teachers }: EditClassModa
       setError(null);
       setSuccessMsg(null);
     }
-  }, [cls, teachers]);
+  }, [cls, teachers, books]);
 
   if (!isOpen || !cls) return null;
 
@@ -149,15 +176,29 @@ export function EditClassModal({ isOpen, onClose, cls, teachers }: EditClassModa
     const autoBook = getBookForLevel(selectedLevel);
     setLevel(selectedLevel);
     setBook(autoBook as CourseBook);
+    if (books.length > 0) {
+      const match = books.find((b) =>
+        b.shortName.toLowerCase().includes(autoBook.toLowerCase()) ||
+        b.name.toLowerCase().includes(autoBook.toLowerCase())
+      );
+      if (match) setSelectedBookId(match.id);
+    }
   };
+
+  const isPresencial = modality === ClassModality.PRESENCIAL;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setSuccessMsg(null);
 
-    if (!unitTeacherId || !speakingTeacherId) {
-      setError('Debes asignar tanto al Profesor de Unit Class como al Profesor de Speaking.');
+    if (!unitTeacherId) {
+      setError('Debes asignar al Profesor de Unit Class.');
+      return;
+    }
+
+    if (!isPresencial && !speakingTeacherId) {
+      setError('Debes asignar al Profesor de Speaking para cursos virtuales o híbridos.');
       return;
     }
 
@@ -166,13 +207,15 @@ export function EditClassModal({ isOpen, onClose, cls, teachers }: EditClassModa
       return;
     }
 
-    if (speakingDays.length === 0) {
+    if (!isPresencial && speakingDays.length === 0) {
       setError('Debes seleccionar al menos un día para la Speaking Class.');
       return;
     }
 
     const unitScheduleFormatted = `${unitDays.join(' y ')} ${unitStartTime} - ${unitEndTime}`;
-    const speakingScheduleFormatted = `${speakingDays.join(' y ')} ${speakingStartTime} - ${speakingEndTime} (Virtual)`;
+    const speakingScheduleFormatted = !isPresencial && speakingDays.length > 0
+      ? `${speakingDays.join(' y ')} ${speakingStartTime} - ${speakingEndTime} (Virtual)`
+      : null;
 
     startTransition(async () => {
       const res = await updateClassAction(cls.id, {
@@ -180,10 +223,11 @@ export function EditClassModal({ isOpen, onClose, cls, teachers }: EditClassModa
         name,
         level,
         book,
+        bookId: selectedBookId || null,
         modality,
         classroomId: selectedClassroomId,
         unitTeacherId,
-        speakingTeacherId,
+        speakingTeacherId: !isPresencial ? speakingTeacherId : null,
         unitSchedule: unitScheduleFormatted,
         speakingSchedule: speakingScheduleFormatted,
       });
@@ -298,13 +342,33 @@ export function EditClassModal({ isOpen, onClose, cls, teachers }: EditClassModa
                 Libro / Material *
               </label>
               <select
-                value={book}
-                onChange={(e) => setBook(e.target.value as CourseBook)}
+                value={selectedBookId}
+                onChange={(e) => {
+                  const bId = e.target.value;
+                  setSelectedBookId(bId);
+                  const chosen = books.find((b) => b.id === bId);
+                  if (chosen) {
+                    const s = chosen.shortName.toLowerCase();
+                    if (s.includes('amarillo')) setBook(CourseBook.AMARILLO);
+                    else if (s.includes('rojo')) setBook(CourseBook.ROJO);
+                    else if (s.includes('azul')) setBook(CourseBook.AZUL);
+                  }
+                }}
                 className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-800 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-500/10"
               >
-                <option value={CourseBook.AMARILLO}>🟡 Amarillo (Intro A/B)</option>
-                <option value={CourseBook.ROJO}>🔴 Rojo (L1A/B)</option>
-                <option value={CourseBook.AZUL}>🔵 Azul (L2A/B)</option>
+                {books.length > 0 ? (
+                  books.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name} {b.levelsLabel ? `(${b.levelsLabel})` : ''}
+                    </option>
+                  ))
+                ) : (
+                  <>
+                    <option value="">🟡 Amarillo (Intro A/B)</option>
+                    <option value="">🔴 Rojo (L1A/B)</option>
+                    <option value="">🔵 Azul (L2A/B)</option>
+                  </>
+                )}
               </select>
             </div>
 
@@ -348,7 +412,7 @@ export function EditClassModal({ isOpen, onClose, cls, teachers }: EditClassModa
               Docentes Asignados
             </h4>
             
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className={`grid grid-cols-1 ${!isPresencial ? 'sm:grid-cols-2' : ''} gap-3`}>
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Profesor Unit Class *
@@ -368,25 +432,33 @@ export function EditClassModal({ isOpen, onClose, cls, teachers }: EditClassModa
                 </select>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Profesor Speaking *
-                </label>
-                <select
-                  required
-                  value={speakingTeacherId}
-                  onChange={(e) => setSpeakingTeacherId(e.target.value)}
-                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-800 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-500/10"
-                >
-                  <option value="">-- Seleccionar Profesor --</option>
-                  {teachers.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.firstName} {t.lastName} ({t.ci})
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {!isPresencial && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Profesor Speaking *
+                  </label>
+                  <select
+                    required={!isPresencial}
+                    value={speakingTeacherId}
+                    onChange={(e) => setSpeakingTeacherId(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-800 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-500/10"
+                  >
+                    <option value="">-- Seleccionar Profesor --</option>
+                    {teachers.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.firstName} {t.lastName} ({t.ci})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
+
+            {isPresencial && (
+              <p className="text-[11px] text-slate-400 italic">
+                * Los cursos presenciales son impartidos por el docente de Unit Class en el aula asignada y no requieren docente de Speaking virtual separado.
+              </p>
+            )}
           </div>
 
           {/* Horarios Estructurados */}
@@ -403,7 +475,7 @@ export function EditClassModal({ isOpen, onClose, cls, teachers }: EditClassModa
                   Horario Unit Class *
                 </span>
                 <span className="text-[10px] font-semibold text-slate-400">
-                  Clases Teóricas / Presenciales
+                  {isPresencial ? 'Clases Presenciales en Aula' : 'Clases Teóricas / Presenciales'}
                 </span>
               </div>
 
@@ -463,73 +535,75 @@ export function EditClassModal({ isOpen, onClose, cls, teachers }: EditClassModa
               </div>
             </div>
 
-            {/* B. Horario Speaking Class */}
-            <div className="rounded-2xl bg-slate-50/80 p-4 border border-slate-200/70 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                  <MessageSquare className="h-3.5 w-3.5 text-blue-600" />
-                  Horario Speaking Class *
-                </span>
-                <span className="text-[10px] font-semibold text-slate-400">
-                  Sesión de Conversación / Virtual
-                </span>
-              </div>
-
-              {/* Selector de Días Speaking */}
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-600 mb-1.5">
-                  Días de Speaking:
-                </label>
-                <div className="flex flex-wrap gap-1.5">
-                  {DAYS_OF_WEEK.map((day) => {
-                    const isSelected = speakingDays.includes(day.key);
-                    return (
-                      <button
-                        type="button"
-                        key={day.key}
-                        onClick={() => toggleSpeakingDay(day.key)}
-                        className={`rounded-xl px-3 py-1.5 text-xs font-bold transition-all duration-150 ${
-                          isSelected
-                            ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/20 scale-[1.02]'
-                            : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100 hover:text-slate-900'
-                        }`}
-                      >
-                        {day.label}
-                      </button>
-                    );
-                  })}
+            {/* B. Horario Speaking Class (Solo Virtual / Híbrida) */}
+            {!isPresencial && (
+              <div className="rounded-2xl bg-slate-50/80 p-4 border border-slate-200/70 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                    <MessageSquare className="h-3.5 w-3.5 text-blue-600" />
+                    Horario Speaking Class *
+                  </span>
+                  <span className="text-[10px] font-semibold text-slate-400">
+                    Sesión de Conversación / Virtual
+                  </span>
                 </div>
-              </div>
 
-              {/* Franja Horaria Speaking */}
-              <div className="grid grid-cols-2 gap-3 pt-1">
+                {/* Selector de Días Speaking */}
                 <div>
-                  <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                    Hora Inicio:
+                  <label className="block text-[11px] font-semibold text-slate-600 mb-1.5">
+                    Días de Speaking:
                   </label>
-                  <input
-                    type="time"
-                    value={speakingStartTime}
-                    onChange={(e) => setSpeakingStartTime(e.target.value)}
-                    required
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/10"
-                  />
+                  <div className="flex flex-wrap gap-1.5">
+                    {DAYS_OF_WEEK.map((day) => {
+                      const isSelected = speakingDays.includes(day.key);
+                      return (
+                        <button
+                          type="button"
+                          key={day.key}
+                          onClick={() => toggleSpeakingDay(day.key)}
+                          className={`rounded-xl px-3 py-1.5 text-xs font-bold transition-all duration-150 ${
+                            isSelected
+                              ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/20 scale-[1.02]'
+                              : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100 hover:text-slate-900'
+                          }`}
+                        >
+                          {day.label}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
 
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                    Hora Fin:
-                  </label>
-                  <input
-                    type="time"
-                    value={speakingEndTime}
-                    onChange={(e) => setSpeakingEndTime(e.target.value)}
-                    required
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/10"
-                  />
+                {/* Franja Horaria Speaking */}
+                <div className="grid grid-cols-2 gap-3 pt-1">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                      Hora Inicio:
+                    </label>
+                    <input
+                      type="time"
+                      value={speakingStartTime}
+                      onChange={(e) => setSpeakingStartTime(e.target.value)}
+                      required={!isPresencial}
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/10"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                      Hora Fin:
+                    </label>
+                    <input
+                      type="time"
+                      value={speakingEndTime}
+                      onChange={(e) => setSpeakingEndTime(e.target.value)}
+                      required={!isPresencial}
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/10"
+                    />
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
           </div>
 
           {/* Action Buttons */}

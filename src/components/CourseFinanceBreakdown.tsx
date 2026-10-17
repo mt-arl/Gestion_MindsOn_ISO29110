@@ -68,7 +68,7 @@ export function CourseFinanceBreakdown({ initialData }: CourseFinanceBreakdownPr
         course.name.toLowerCase().includes(query) ||
         course.code.toLowerCase().includes(query) ||
         course.unitTeacher.name.toLowerCase().includes(query) ||
-        course.speakingTeacher.name.toLowerCase().includes(query);
+        (course.speakingTeacher?.name.toLowerCase().includes(query) ?? false);
 
       const matchStudent = course.students.some(
         (st) =>
@@ -311,10 +311,14 @@ export function CourseFinanceBreakdown({ initialData }: CourseFinanceBreakdownPr
                       <span className="text-slate-700">
                         <strong>Unit:</strong> {course.unitTeacher.name}
                       </span>
-                      <span>•</span>
-                      <span className="text-slate-700">
-                        <strong>Speaking:</strong> {course.speakingTeacher.name}
-                      </span>
+                      {course.speakingTeacher && (
+                        <>
+                          <span>•</span>
+                          <span className="text-slate-700">
+                            <strong>Speaking:</strong> {course.speakingTeacher.name}
+                          </span>
+                        </>
+                      )}
                     </div>
                   </div>
 

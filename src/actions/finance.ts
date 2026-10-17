@@ -50,7 +50,7 @@ export type SerializedTuitionFee = {
     modality: ClassModality;
     classroom: string;
     unitSchedule: string;
-    speakingSchedule: string;
+    speakingSchedule: string | null;
   };
   payments: Array<{
     id: string;
@@ -111,7 +111,7 @@ export type StudentFinancialHistory = {
       modality: ClassModality;
       classroom: string;
       unitSchedule: string;
-      speakingSchedule: string;
+      speakingSchedule: string | null;
     } | null;
   };
   metrics: {
@@ -356,9 +356,9 @@ export type PaymentReceiptData = {
     classroom: string;
     modality: ClassModality;
     unitSchedule: string;
-    speakingSchedule: string;
+    speakingSchedule: string | null;
     unitTeacherName: string;
-    speakingTeacherName: string;
+    speakingTeacherName: string | null;
   };
 };
 
@@ -541,9 +541,9 @@ export async function getPaymentReceiptDataAction(
           classroom: cls.classroom?.name || 'Aula BRAZIL',
           modality: cls.modality,
           unitSchedule: cls.unitSchedule,
-          speakingSchedule: cls.speakingSchedule,
+          speakingSchedule: cls.speakingSchedule || null,
           unitTeacherName: `${cls.unitTeacher.firstName} ${cls.unitTeacher.lastName}`,
-          speakingTeacherName: `${cls.speakingTeacher.firstName} ${cls.speakingTeacher.lastName}`,
+          speakingTeacherName: cls.speakingTeacher ? `${cls.speakingTeacher.firstName} ${cls.speakingTeacher.lastName}` : null,
         },
       },
     };
@@ -770,7 +770,7 @@ export type CourseFinanceBreakdownItem = {
     id: string;
     name: string;
     phone: string;
-  };
+  } | null;
   students: StudentBreakdownInCourse[];
   totals: {
     activeStudentsCount: number;
@@ -1012,11 +1012,11 @@ export async function getCourseFinanceBreakdownAction(
           name: `${cls.unitTeacher.firstName} ${cls.unitTeacher.lastName}`,
           phone: cls.unitTeacher.phone,
         },
-        speakingTeacher: {
+        speakingTeacher: cls.speakingTeacher ? {
           id: cls.speakingTeacher.id,
           name: `${cls.speakingTeacher.firstName} ${cls.speakingTeacher.lastName}`,
           phone: cls.speakingTeacher.phone,
-        },
+        } : null,
         students: studentList,
         totals: {
           activeStudentsCount: cls.students.length,

@@ -38,6 +38,8 @@ import {
   layoutDayEvents
 } from '@/lib/calendar-utils';
 import { formatCurrency, formatDate } from '@/lib/utils';
+import { getBookColorStyles } from '@/lib/book-colors';
+import { getBooksAction, SerializedBook } from '@/actions/books';
 import { CreatePrivateClassModal } from './CreatePrivateClassModal';
 import { ClassroomsModal } from './ClassroomsModal';
 import { ClassDetailsModal } from './ClassDetailsModal';
@@ -58,9 +60,55 @@ export function ScheduleView({ scheduleData, teachers, students }: ScheduleViewP
   const [selectedClassForDetails, setSelectedClassForDetails] = useState<RegularClassSchedule | null>(null);
   const [selectedPrivateForDetails, setSelectedPrivateForDetails] = useState<PrivateClassSchedule | null>(null);
 
-  const [filterBook, setFilterBook] = useState<'ALL' | 'AMARILLO' | 'ROJO' | 'AZUL' | 'PRIVATE'>('ALL');
+  const [books, setBooks] = useState<SerializedBook[]>([]);
+  const [filterBook, setFilterBook] = useState<string>('ALL');
   const [filterClassroom, setFilterClassroom] = useState<string>('ALL');
   const [viewMode, setViewMode] = useState<'GRID' | 'LIST'>('GRID');
+
+  const [hoveredTooltip, setHoveredTooltip] = useState<{
+    event: PositionedCalendarEvent;
+    x: number;
+    y: number;
+    placement: 'top' | 'bottom';
+  } | null>(null);
+
+  const handleMouseEnter = (ev: PositionedCalendarEvent, e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const tooltipWidth = 320;
+    const tooltipHeight = 220;
+
+    let x = rect.left + rect.width / 2;
+    const margin = 16;
+    if (x - tooltipWidth / 2 < margin) {
+      x = margin + tooltipWidth / 2;
+    } else if (x + tooltipWidth / 2 > window.innerWidth - margin) {
+      x = window.innerWidth - margin - tooltipWidth / 2;
+    }
+
+    let y = rect.top - 10;
+    let placement: 'top' | 'bottom' = 'top';
+    if (rect.top < tooltipHeight + 16) {
+      y = rect.bottom + 10;
+      placement = 'bottom';
+    }
+
+    setHoveredTooltip({
+      event: ev,
+      x,
+      y,
+      placement,
+    });
+  };
+
+  const handleMouseLeave = () => {
+    setHoveredTooltip(null);
+  };
+
+  React.useEffect(() => {
+    getBooksAction(false).then((data) => {
+      setBooks(data);
+    });
+  }, []);
 
   // Navegación Semanal
   const prevWeek = () => {
@@ -225,38 +273,61 @@ export function ScheduleView({ scheduleData, teachers, students }: ScheduleViewP
             Todos ({calendarEvents.length})
           </button>
 
-          <button
-            onClick={() => setFilterBook('AMARILLO')}
-            className={`rounded-xl px-3.5 py-1.5 text-xs font-bold border transition-all ${
-              filterBook === 'AMARILLO'
-                ? 'bg-amber-500 text-white border-amber-500 shadow-sm shadow-amber-500/20'
-                : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
-            }`}
-          >
-            🟡 Libro Amarillo (Intro A/B)
-          </button>
+          {books.length > 0 ? (
+            books.map((b) => {
+              const styles = getBookColorStyles(b.colorTheme);
+              const isSelected = filterBook === b.id || filterBook === b.shortName;
+              return (
+                <button
+                  key={b.id}
+                  onClick={() => setFilterBook(isSelected ? 'ALL' : b.id)}
+                  className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold border transition-all ${
+                    isSelected
+                      ? `${styles.badge} ring-2 ring-indigo-500/30 shadow-sm font-black`
+                      : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  <span className={`h-2 w-2 rounded-full ${styles.indicator}`} />
+                  {b.name} {b.levelsLabel ? `(${b.levelsLabel})` : ''}
+                </button>
+              );
+            })
+          ) : (
+            <>
+              <button
+                onClick={() => setFilterBook('AMARILLO')}
+                className={`rounded-xl px-3.5 py-1.5 text-xs font-bold border transition-all ${
+                  filterBook === 'AMARILLO'
+                    ? 'bg-amber-500 text-white border-amber-500 shadow-sm shadow-amber-500/20'
+                    : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
+                }`}
+              >
+                🟡 Libro Amarillo (Intro A/B)
+              </button>
 
-          <button
-            onClick={() => setFilterBook('ROJO')}
-            className={`rounded-xl px-3.5 py-1.5 text-xs font-bold border transition-all ${
-              filterBook === 'ROJO'
-                ? 'bg-rose-500 text-white border-rose-500 shadow-sm shadow-rose-500/20'
-                : 'bg-rose-50 text-rose-800 border-rose-200 hover:bg-rose-100'
-            }`}
-          >
-            🔴 Libro Rojo (L1A/B)
-          </button>
+              <button
+                onClick={() => setFilterBook('ROJO')}
+                className={`rounded-xl px-3.5 py-1.5 text-xs font-bold border transition-all ${
+                  filterBook === 'ROJO'
+                    ? 'bg-rose-500 text-white border-rose-500 shadow-sm shadow-rose-500/20'
+                    : 'bg-rose-50 text-rose-800 border-rose-200 hover:bg-rose-100'
+                }`}
+              >
+                🔴 Libro Rojo (L1A/B)
+              </button>
 
-          <button
-            onClick={() => setFilterBook('AZUL')}
-            className={`rounded-xl px-3.5 py-1.5 text-xs font-bold border transition-all ${
-              filterBook === 'AZUL'
-                ? 'bg-sky-500 text-white border-sky-500 shadow-sm shadow-sky-500/20'
-                : 'bg-sky-50 text-sky-800 border-sky-200 hover:bg-sky-100'
-            }`}
-          >
-            🔵 Libro Azul (L2A/B)
-          </button>
+              <button
+                onClick={() => setFilterBook('AZUL')}
+                className={`rounded-xl px-3.5 py-1.5 text-xs font-bold border transition-all ${
+                  filterBook === 'AZUL'
+                    ? 'bg-sky-500 text-white border-sky-500 shadow-sm shadow-sky-500/20'
+                    : 'bg-sky-50 text-sky-800 border-sky-200 hover:bg-sky-100'
+                }`}
+              >
+                🔵 Libro Azul (L2A/B)
+              </button>
+            </>
+          )}
 
           <button
             onClick={() => setFilterBook('PRIVATE')}
@@ -406,13 +477,15 @@ export function ScheduleView({ scheduleData, teachers, students }: ScheduleViewP
                         if (ev.isRecess) {
                           colorStyles = 'bg-slate-100/95 border-l-4 border-slate-400 text-slate-600 opacity-75 hover:opacity-100 transition-opacity border-dashed shadow-xs';
                         } else if (ev.type === 'PRIVATE') {
-                          colorStyles = 'bg-purple-100/95 border-l-4 border-purple-500 text-purple-950 hover:bg-purple-200/95 shadow-purple-500/10';
-                        } else if (ev.book === 'AMARILLO') {
-                          colorStyles = 'bg-amber-100/95 border-l-4 border-amber-500 text-amber-950 hover:bg-amber-200/95 shadow-amber-500/10';
-                        } else if (ev.book === 'ROJO') {
-                          colorStyles = 'bg-rose-100/95 border-l-4 border-rose-500 text-rose-950 hover:bg-rose-200/95 shadow-rose-500/10';
+                          if (ev.bookColorTheme) {
+                            const dynamicPalette = getBookColorStyles(ev.bookColorTheme);
+                            colorStyles = `${dynamicPalette.calendarEvent} shadow-xs`;
+                          } else {
+                            colorStyles = 'bg-purple-100/95 border-l-4 border-purple-500 text-purple-950 hover:bg-purple-200/95 shadow-purple-500/10';
+                          }
                         } else {
-                          colorStyles = 'bg-sky-100/95 border-l-4 border-sky-500 text-sky-950 hover:bg-sky-200/95 shadow-sky-500/10';
+                          const dynamicPalette = getBookColorStyles(ev.bookColorTheme, ev.book);
+                          colorStyles = `${dynamicPalette.calendarEvent} shadow-xs`;
                         }
 
                         return (
@@ -422,9 +495,10 @@ export function ScheduleView({ scheduleData, teachers, students }: ScheduleViewP
                               if (ev.rawClass) setSelectedClassForDetails(ev.rawClass);
                               else if (ev.rawPrivateClass) setSelectedPrivateForDetails(ev.rawPrivateClass);
                             }}
+                            onMouseEnter={(e) => handleMouseEnter(ev, e)}
+                            onMouseLeave={handleMouseLeave}
                             style={style}
-                            className={`flex flex-col justify-between overflow-hidden rounded-xl p-1.5 sm:p-2 text-left text-xs shadow-sm transition-all duration-150 hover:scale-[1.02] hover:shadow-md hover:z-30 cursor-pointer ${colorStyles}`}
-                            title={`${ev.title} • Aula ${ev.classroom} • ${ev.startTime} - ${ev.endTime}`}
+                            className={`flex flex-col justify-between overflow-hidden rounded-xl p-1.5 sm:p-2 text-left text-xs shadow-xs transition-all duration-150 hover:scale-[1.02] hover:shadow-md hover:z-30 cursor-pointer ${colorStyles}`}
                           >
                             <div className="space-y-0.5">
                               {/* Header del bloque */}
@@ -491,15 +565,8 @@ export function ScheduleView({ scheduleData, teachers, students }: ScheduleViewP
         <div className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
             {scheduleData.regularClasses.map((cls) => {
-              const isAmarillo = cls.book === 'AMARILLO';
-              const isRojo = cls.book === 'ROJO';
-              const isAzul = cls.book === 'AZUL';
-
-              const cardClasses = isAmarillo
-                ? 'bg-amber-50/70 border-l-4 border-amber-500 text-amber-950'
-                : isRojo
-                ? 'bg-rose-50/70 border-l-4 border-rose-500 text-rose-950'
-                : 'bg-sky-50/70 border-l-4 border-sky-500 text-sky-950';
+              const colorStyles = getBookColorStyles(cls.bookRef?.colorTheme, cls.book);
+              const cardClasses = `${colorStyles.bgLight} border-l-4 ${colorStyles.borderPrimary} text-slate-900`;
 
               return (
                 <div
@@ -509,9 +576,15 @@ export function ScheduleView({ scheduleData, teachers, students }: ScheduleViewP
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div>
-                      <span className="font-mono text-[10px] font-black bg-white/80 px-2 py-0.5 rounded shadow-sm">
-                        {cls.code}
-                      </span>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-mono text-[10px] font-black bg-white/80 px-2 py-0.5 rounded shadow-sm">
+                          {cls.code}
+                        </span>
+                        <span className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-bold border shadow-xs ${colorStyles.badge}`}>
+                          <span className={`h-1.5 w-1.5 rounded-full ${colorStyles.indicator}`} />
+                          {cls.bookRef?.shortName || cls.book}
+                        </span>
+                      </div>
                       <h3 className="mt-2 text-base font-extrabold tracking-tight">
                         {cls.name}
                       </h3>
@@ -525,9 +598,15 @@ export function ScheduleView({ scheduleData, teachers, students }: ScheduleViewP
                     <p className="font-bold text-slate-800">
                       Unit Class: <span className="font-medium text-slate-600">{cls.unitSchedule}</span>
                     </p>
-                    <p className="font-bold text-slate-800 pt-1 border-t border-slate-100">
-                      Speaking: <span className="font-medium text-slate-600">{cls.speakingSchedule}</span>
-                    </p>
+                    {cls.speakingSchedule ? (
+                      <p className="font-bold text-slate-800 pt-1 border-t border-slate-100">
+                        Speaking: <span className="font-medium text-slate-600">{cls.speakingSchedule}</span>
+                      </p>
+                    ) : (
+                      <p className="text-[11px] text-slate-400 italic pt-1 border-t border-slate-100">
+                        Modalidad presencial (sin sesión de speaking virtual)
+                      </p>
+                    )}
                   </div>
 
                   <div className="mt-4 flex items-center justify-between text-xs font-bold pt-1">
@@ -541,6 +620,117 @@ export function ScheduleView({ scheduleData, teachers, students }: ScheduleViewP
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {/* Floating Hover Card Tooltip (Portal / Fixed coordinates) */}
+      {hoveredTooltip && (
+        <div
+          style={{
+            left: `${hoveredTooltip.x}px`,
+            top: `${hoveredTooltip.y}px`,
+            transform: hoveredTooltip.placement === 'top' ? 'translate(-50%, -100%)' : 'translate(-50%, 0)',
+          }}
+          className="fixed z-50 pointer-events-none w-72 sm:w-80 rounded-2xl bg-slate-900/95 text-white p-3.5 shadow-2xl backdrop-blur-md border border-slate-700/80 animate-in fade-in zoom-in-95 duration-100 space-y-2.5"
+        >
+          {/* Header: Code & Session Type Badge */}
+          <div className="flex items-center justify-between gap-2 border-b border-slate-800 pb-2">
+            <span className="font-mono text-[10px] font-black uppercase bg-slate-800 text-indigo-300 px-2 py-0.5 rounded border border-slate-700">
+              {hoveredTooltip.event.code || (hoveredTooltip.event.type === 'PRIVATE' ? 'SESIÓN 1 A 1' : 'CURSO')}
+            </span>
+            <span className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded ${
+              hoveredTooltip.event.isRecess
+                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                : hoveredTooltip.event.type === 'SPEAKING'
+                ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30'
+                : hoveredTooltip.event.type === 'PRIVATE'
+                ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
+                : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+            }`}>
+              {hoveredTooltip.event.isRecess
+                ? 'Curso en Receso'
+                : hoveredTooltip.event.type === 'SPEAKING'
+                ? 'Speaking Class (Virtual)'
+                : hoveredTooltip.event.type === 'PRIVATE'
+                ? 'Clase Privada'
+                : 'Unit Class (Presencial)'}
+            </span>
+          </div>
+
+          {/* Title & Topic */}
+          <div>
+            <h4 className="text-xs sm:text-sm font-extrabold text-white leading-snug line-clamp-2">
+              {hoveredTooltip.event.title}
+            </h4>
+            {hoveredTooltip.event.topic && hoveredTooltip.event.type === 'PRIVATE' && (
+              <p className="text-[11px] text-slate-300 mt-0.5 line-clamp-2">
+                Objetivo: {hoveredTooltip.event.topic}
+              </p>
+            )}
+          </div>
+
+          {/* Book / Material */}
+          {(hoveredTooltip.event.bookName || hoveredTooltip.event.bookShortName || hoveredTooltip.event.book) && (() => {
+            const styles = getBookColorStyles(hoveredTooltip.event.bookColorTheme, hoveredTooltip.event.book);
+            const displayName = hoveredTooltip.event.bookName || hoveredTooltip.event.bookShortName || (
+              hoveredTooltip.event.book === 'AMARILLO' ? 'Libro Amarillo' : hoveredTooltip.event.book === 'ROJO' ? 'Libro Rojo' : 'Libro Azul'
+            );
+            return (
+              <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-200 bg-slate-800/80 px-2 py-1 rounded-lg border border-slate-700/60">
+                <span className={`h-2.5 w-2.5 rounded-full ${styles.indicator}`} />
+                <span>{displayName}</span>
+              </div>
+            );
+          })()}
+
+          {/* Details Grid */}
+          <div className="grid grid-cols-2 gap-2 pt-1 text-[11px] border-t border-slate-800/80">
+            <div className="space-y-0.5">
+              <span className="flex items-center gap-1 text-slate-400 font-semibold text-[10px]">
+                <Clock className="h-3 w-3 text-indigo-400 shrink-0" /> Horario
+              </span>
+              <p className="font-bold text-slate-200">
+                {hoveredTooltip.event.startTime} - {hoveredTooltip.event.endTime}
+              </p>
+            </div>
+
+            <div className="space-y-0.5">
+              <span className="flex items-center gap-1 text-slate-400 font-semibold text-[10px]">
+                <MapPin className="h-3 w-3 text-rose-400 shrink-0" /> Aula / Espacio
+              </span>
+              <p className="font-bold text-slate-200 truncate">
+                {hoveredTooltip.event.classroom}
+              </p>
+            </div>
+
+            <div className="space-y-0.5">
+              <span className="flex items-center gap-1 text-slate-400 font-semibold text-[10px]">
+                <User className="h-3 w-3 text-emerald-400 shrink-0" /> Docente
+              </span>
+              <p className="font-bold text-slate-200 truncate">
+                {hoveredTooltip.event.teacherName}
+              </p>
+            </div>
+
+            <div className="space-y-0.5">
+              <span className="flex items-center gap-1 text-slate-400 font-semibold text-[10px]">
+                {hoveredTooltip.event.type === 'PRIVATE' ? (
+                  <>
+                    <DollarSign className="h-3 w-3 text-amber-400 shrink-0" /> Monto Acordado
+                  </>
+                ) : (
+                  <>
+                    <Users className="h-3 w-3 text-sky-400 shrink-0" /> Matriculados
+                  </>
+                )}
+              </span>
+              <p className="font-bold text-slate-200">
+                {hoveredTooltip.event.type === 'PRIVATE'
+                  ? formatCurrency(hoveredTooltip.event.chargeAmount || 0)
+                  : `${hoveredTooltip.event.studentsCount || 0} alumnos`}
+              </p>
+            </div>
           </div>
         </div>
       )}

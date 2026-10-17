@@ -17,6 +17,7 @@ import {
 import { createPrivateClassAction } from '@/actions/schedule';
 import { SerializedTeacher, SerializedStudent } from '@/actions/academic';
 import { getClassroomsAction, SerializedClassroom } from '@/actions/classrooms';
+import { getBooksAction, SerializedBook } from '@/actions/books';
 
 interface CreatePrivateClassModalProps {
   isOpen: boolean;
@@ -36,6 +37,8 @@ export function CreatePrivateClassModal({
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   const [classrooms, setClassrooms] = useState<SerializedClassroom[]>([]);
+  const [books, setBooks] = useState<SerializedBook[]>([]);
+  const [selectedBookId, setSelectedBookId] = useState<string>('');
   const [selectedStudentType, setSelectedStudentType] = useState<'EXISTING' | 'CUSTOM'>('EXISTING');
 
   const [formData, setFormData] = useState({
@@ -62,6 +65,9 @@ export function CreatePrivateClassModal({
             classroom: prev.classroom || data[0].name,
           }));
         }
+      });
+      getBooksAction(false).then((data) => {
+        setBooks(data);
       });
     }
   }, [isOpen]);
@@ -99,6 +105,7 @@ export function CreatePrivateClassModal({
         studentName: studentFinalName,
         studentId: selectedStudentType === 'EXISTING' ? formData.studentId : null,
         teacherId: formData.teacherId,
+        bookId: selectedBookId || null,
         date: formData.date,
         startTime: formData.startTime,
         endTime: formData.endTime,
@@ -263,6 +270,25 @@ export function CreatePrivateClassModal({
                 ))}
               </select>
             </div>
+          </div>
+
+          {/* Libro / Material de Trabajo (Opcional) */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">
+              Libro / Material de Trabajo (Opcional)
+            </label>
+            <select
+              value={selectedBookId}
+              onChange={(e) => setSelectedBookId(e.target.value)}
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-800 focus:border-purple-500 focus:outline-none focus:ring-4 focus:ring-purple-500/10"
+            >
+              <option value="">-- Sin libro específico / General --</option>
+              {books.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name} {b.levelsLabel ? `(${b.levelsLabel})` : ''}
+                </option>
+              ))}
+            </select>
           </div>
 
           {/* Date, Start Time and End Time */}

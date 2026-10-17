@@ -30,9 +30,11 @@ import {
   resumeClassAction 
 } from '@/actions/academic';
 import { formatDate } from '@/lib/utils';
+import { getBookColorStyles } from '@/lib/book-colors';
 import { CreateClassModal } from './CreateClassModal';
 import { EditClassModal } from './EditClassModal';
 import { ClassroomsModal } from './ClassroomsModal';
+import { BooksModal } from './BooksModal';
 
 interface ClassesViewProps {
   initialClasses: SerializedClass[];
@@ -42,6 +44,7 @@ interface ClassesViewProps {
 export function ClassesView({ initialClasses, teachers }: ClassesViewProps) {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isClassroomsModalOpen, setIsClassroomsModalOpen] = useState(false);
+  const [isBooksModalOpen, setIsBooksModalOpen] = useState(false);
   const [classToEdit, setClassToEdit] = useState<SerializedClass | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -60,8 +63,7 @@ export function ClassesView({ initialClasses, teachers }: ClassesViewProps) {
       c.classroom.toLowerCase().includes(query) ||
       c.unitTeacher.firstName.toLowerCase().includes(query) ||
       c.unitTeacher.lastName.toLowerCase().includes(query) ||
-      c.speakingTeacher.firstName.toLowerCase().includes(query) ||
-      c.speakingTeacher.lastName.toLowerCase().includes(query)
+      (c.speakingTeacher ? c.speakingTeacher.firstName.toLowerCase().includes(query) || c.speakingTeacher.lastName.toLowerCase().includes(query) : false)
     );
   });
 
@@ -108,6 +110,25 @@ export function ClassesView({ initialClasses, teachers }: ClassesViewProps) {
     });
   };
 
+  const booksSummary = React.useMemo(() => {
+    const map = new Map<string, { id: string; name: string; colorTheme?: string; legacy?: string; count: number }>();
+    for (const c of initialClasses) {
+      const key = c.bookRef?.id || c.book;
+      const name = c.bookRef?.shortName || c.book;
+      if (!map.has(key)) {
+        map.set(key, {
+          id: key,
+          name,
+          colorTheme: c.bookRef?.colorTheme,
+          legacy: c.book,
+          count: 0,
+        });
+      }
+      map.get(key)!.count += 1;
+    }
+    return Array.from(map.values());
+  }, [initialClasses]);
+
   return (
     <div className="space-y-6">
       {/* Header Bar */}
@@ -122,6 +143,14 @@ export function ClassesView({ initialClasses, teachers }: ClassesViewProps) {
         </div>
 
         <div className="flex items-center gap-2.5 flex-wrap self-start sm:self-auto">
+          <button
+            onClick={() => setIsBooksModalOpen(true)}
+            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs font-bold text-slate-700 shadow-xs hover:bg-slate-50 hover:text-slate-900 active:scale-95 transition-all"
+          >
+            <BookOpen className="h-4 w-4 text-amber-600" />
+            Gestionar Libros
+          </button>
+
           <button
             onClick={() => setIsClassroomsModalOpen(true)}
             className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs font-bold text-slate-700 shadow-xs hover:bg-slate-50 hover:text-slate-900 active:scale-95 transition-all"
@@ -195,9 +224,22 @@ export function ClassesView({ initialClasses, teachers }: ClassesViewProps) {
             </div>
           </div>
           <div className="mt-2 flex items-center gap-1.5 text-xs font-bold flex-wrap">
-            <span className="bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded text-[10px]">🟡 Amarillo</span>
-            <span className="bg-rose-100 text-rose-800 px-1.5 py-0.5 rounded text-[10px]">🔴 Rojo</span>
-            <span className="bg-sky-100 text-sky-800 px-1.5 py-0.5 rounded text-[10px]">🔵 Azul</span>
+            {booksSummary.length > 0 ? (
+              booksSummary.map((b) => {
+                const styles = getBookColorStyles(b.colorTheme, b.legacy);
+                return (
+                  <span
+                    key={b.id}
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold border shadow-xs ${styles.badge}`}
+                  >
+                    <span className={`h-1.5 w-1.5 rounded-full ${styles.indicator}`} />
+                    {b.name} ({b.count})
+                  </span>
+                );
+              })
+            ) : (
+              <span className="text-slate-400 text-xs italic">Sin libros registrados</span>
+            )}
           </div>
         </div>
 
@@ -234,18 +276,13 @@ export function ClassesView({ initialClasses, teachers }: ClassesViewProps) {
       {/* Grid of Class Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {filteredClasses.map((cls) => {
-          const isAmarillo = cls.book === 'AMARILLO';
-          const isRojo = cls.book === 'ROJO';
-          const isAzul = cls.book === 'AZUL';
+          const colorStyles = getBookColorStyles(cls.bookRef?.colorTheme, cls.book);
+          const bookDisplayName = cls.bookRef?.shortName || cls.book;
           const isInRecess = cls.status === 'IN_RECESS';
 
           const bookBorder = isInRecess
             ? 'border-slate-300 border-2 border-dashed bg-slate-50/70 opacity-90 hover:opacity-100 shadow-sm'
-            : isAmarillo
-            ? 'border-amber-400/80 hover:border-amber-500 shadow-amber-500/5'
-            : isRojo
-            ? 'border-rose-400/80 hover:border-rose-500 shadow-rose-500/5'
-            : 'border-sky-400/80 hover:border-sky-500 shadow-sky-500/5';
+            : colorStyles.cardBorder;
 
           return (
             <div
@@ -277,15 +314,10 @@ export function ClassesView({ initialClasses, teachers }: ClassesViewProps) {
 
                   {/* Book Tag */}
                   <span
-                    className={`inline-flex items-center gap-1 rounded-xl px-2.5 py-1 text-[10px] font-black tracking-wide border shadow-sm shrink-0 ${
-                      isAmarillo
-                        ? 'bg-amber-50 text-amber-800 border-amber-200'
-                        : isRojo
-                        ? 'bg-rose-50 text-rose-800 border-rose-200'
-                        : 'bg-sky-50 text-sky-800 border-sky-200'
-                    }`}
+                    className={`inline-flex items-center gap-1.5 rounded-xl px-2.5 py-1 text-[10px] font-black tracking-wide border shadow-sm shrink-0 ${colorStyles.badge}`}
                   >
-                    {isAmarillo ? '🟡 Amarillo' : isRojo ? '🔴 Rojo' : '🔵 Azul'}
+                    <span className={`h-2 w-2 rounded-full ${colorStyles.indicator}`} />
+                    {bookDisplayName}
                   </span>
                 </div>
 
@@ -334,16 +366,18 @@ export function ClassesView({ initialClasses, teachers }: ClassesViewProps) {
                   </div>
 
                   {/* Speaking Class */}
-                  <div className="space-y-1 pt-2 border-t border-slate-200/50">
-                    <div className="flex items-center justify-between text-[11px] font-bold text-slate-700">
-                      <span className="flex items-center gap-1">
-                        <MessageSquare className="h-3.5 w-3.5 text-blue-600" />
-                        Speaking Class:
-                      </span>
-                      <span className="text-slate-900">{cls.speakingTeacher.firstName} {cls.speakingTeacher.lastName}</span>
+                  {cls.speakingTeacher && (
+                    <div className="space-y-1 pt-2 border-t border-slate-200/50">
+                      <div className="flex items-center justify-between text-[11px] font-bold text-slate-700">
+                        <span className="flex items-center gap-1">
+                          <MessageSquare className="h-3.5 w-3.5 text-blue-600" />
+                          Speaking Class:
+                        </span>
+                        <span className="text-slate-900">{cls.speakingTeacher.firstName} {cls.speakingTeacher.lastName}</span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 pl-4">{cls.speakingSchedule || 'Virtual'}</p>
                     </div>
-                    <p className="text-[11px] text-slate-500 pl-4">{cls.speakingSchedule}</p>
-                  </div>
+                  )}
                 </div>
               </div>
 
@@ -417,6 +451,12 @@ export function ClassesView({ initialClasses, teachers }: ClassesViewProps) {
       <ClassroomsModal
         isOpen={isClassroomsModalOpen}
         onClose={() => setIsClassroomsModalOpen(false)}
+      />
+
+      {/* Modal Gestión de Libros */}
+      <BooksModal
+        isOpen={isBooksModalOpen}
+        onClose={() => setIsBooksModalOpen(false)}
       />
     </div>
   );

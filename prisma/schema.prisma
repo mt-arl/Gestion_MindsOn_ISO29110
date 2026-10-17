@@ -196,20 +196,22 @@ model Class {
   code              String        @unique // e.g. "ENG-INTRO-A1"
   name              String
   level             CourseLevel
-  book              CourseBook
+  book              CourseBook    // Enum mantenido por compatibilidad
+  bookId            String?
+  bookRef           Book?         @relation(fields: [bookId], references: [id], onDelete: SetNull)
   modality          ClassModality
   classroomId       String?
   classroom         Classroom?    @relation(fields: [classroomId], references: [id], onDelete: SetNull)
   unitSchedule      String        // e.g. "Lunes y Miércoles 17:00 - 18:30"
-  speakingSchedule  String        // e.g. "Viernes 17:00 - 18:30 (Virtual)"
+  speakingSchedule  String?       // e.g. "Viernes 17:00 - 18:30 (Virtual)" (opcional para presencial)
 
   // Profesor de Unit Class (obligatorio)
   unitTeacherId     String
   unitTeacher       Teacher       @relation("UnitTeacherClasses", fields: [unitTeacherId], references: [id], onDelete: Restrict)
 
-  // Profesor de Speaking (obligatorio)
-  speakingTeacherId String
-  speakingTeacher   Teacher       @relation("SpeakingTeacherClasses", fields: [speakingTeacherId], references: [id], onDelete: Restrict)
+  // Profesor de Speaking (opcional para cursos presenciales)
+  speakingTeacherId String?
+  speakingTeacher   Teacher?      @relation("SpeakingTeacherClasses", fields: [speakingTeacherId], references: [id], onDelete: SetNull)
 
   // Estado y Gestión de Receso
   status            ClassStatus   @default(ACTIVE)
@@ -229,9 +231,27 @@ model Class {
   @@index([speakingTeacherId])
   @@index([level])
   @@index([book])
+  @@index([bookId])
   @@index([classroomId])
   @@index([status])
   @@map("classes")
+}
+
+model Book {
+  id          String   @id @default(cuid())
+  name        String   @unique // Ej: "Libro Amarillo", "Libro Rojo", "Libro Azul", "Libro Verde"
+  shortName   String   // Ej: "Amarillo", "Rojo", "Azul", "Verde" (para chips compactos)
+  levelsLabel String?  // Ej: "Intro A / Intro B", "Level 1A / 1B", "Level 2A / 2B"
+  colorTheme  String   @default("yellow") // "yellow" | "red" | "blue" | "emerald" | "purple" | "orange" | "indigo" | "teal" | "pink" | "slate"
+  sortOrder   Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  classes        Class[]
+  privateClasses PrivateClass[]
+
+  @@map("books")
 }
 
 model PrivateClass {
@@ -246,6 +266,8 @@ model PrivateClass {
   endTime      String             // ej: "16:00"
   classroomId  String?
   classroom    Classroom?         @relation(fields: [classroomId], references: [id], onDelete: SetNull)
+  bookId       String?
+  bookRef      Book?              @relation(fields: [bookId], references: [id], onDelete: SetNull)
   topic        String
   chargeAmount Decimal            @db.Decimal(10, 2)
   status       PrivateClassStatus @default(PROGRAMADA)
@@ -257,6 +279,7 @@ model PrivateClass {
   @@index([studentId])
   @@index([date])
   @@index([classroomId])
+  @@index([bookId])
   @@map("private_classes")
 }
 

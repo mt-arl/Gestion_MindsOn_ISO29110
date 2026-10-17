@@ -37,6 +37,10 @@ export type CalendarEvent = {
   code?: string;
   level?: CourseLevel;
   book?: CourseBook;
+  bookId?: string | null;
+  bookColorTheme?: string | null;
+  bookShortName?: string | null;
+  bookName?: string | null;
   classroom: string;
   modality?: string;
   teacherName: string;
@@ -171,7 +175,7 @@ export function generateWeeklyCalendarEvents(
   regularClasses: RegularClassSchedule[],
   privateClasses: PrivateClassSchedule[],
   weekDays: WeekDayInfo[],
-  filterBook: 'ALL' | 'AMARILLO' | 'ROJO' | 'AZUL' | 'PRIVATE' = 'ALL',
+  filterBook: string = 'ALL',
   filterClassroom: string = 'ALL'
 ): CalendarEvent[] {
   const events: CalendarEvent[] = [];
@@ -185,7 +189,15 @@ export function generateWeeklyCalendarEvents(
   // 1. Procesar Cursos Regulares (Unit Classes y Speaking)
   if (filterBook !== 'PRIVATE') {
     for (const cls of regularClasses) {
-      if (filterBook !== 'ALL' && cls.book !== filterBook) continue;
+      if (filterBook !== 'ALL') {
+        const matchesBook =
+          cls.bookId === filterBook ||
+          cls.book === filterBook ||
+          cls.bookRef?.id === filterBook ||
+          cls.bookRef?.name === filterBook ||
+          cls.bookRef?.shortName === filterBook;
+        if (!matchesBook) continue;
+      }
       if (filterClassroom !== 'ALL' && cls.classroom !== filterClassroom) continue;
 
       // Unit Classes
@@ -209,6 +221,10 @@ export function generateWeeklyCalendarEvents(
           code: cls.code,
           level: cls.level,
           book: cls.book,
+          bookId: cls.bookId,
+          bookColorTheme: cls.bookRef?.colorTheme || null,
+          bookShortName: cls.bookRef?.shortName || null,
+          bookName: cls.bookRef?.name || null,
           classroom: cls.classroom,
           modality: cls.modality,
           teacherName: cls.unitTeacher.name,
@@ -226,92 +242,111 @@ export function generateWeeklyCalendarEvents(
         });
       }
 
-      // Speaking Classes
-      const speakingDays = extractDaysFromSchedule(cls.speakingSchedule);
-      const speakingTimes = extractTimesFromSchedule(cls.speakingSchedule);
-      const spkStartDec = timeStringToDecimal(speakingTimes.startTime);
-      const spkEndDec = Math.max(spkStartDec + 0.5, timeStringToDecimal(speakingTimes.endTime));
+      // Speaking Classes (Solo si tiene horario y profesor de Speaking asignados)
+      if (cls.speakingSchedule && cls.speakingTeacher) {
+        const speakingDays = extractDaysFromSchedule(cls.speakingSchedule);
+        if (speakingDays.length > 0) {
+          const speakingTimes = extractTimesFromSchedule(cls.speakingSchedule);
+          const spkStartDec = timeStringToDecimal(speakingTimes.startTime);
+          const spkEndDec = Math.max(spkStartDec + 0.5, timeStringToDecimal(speakingTimes.endTime));
 
-      for (const day of speakingDays) {
-        const clampedStart = Math.max(START_HOUR, Math.min(END_HOUR, spkStartDec));
-        const clampedEnd = Math.max(clampedStart + 0.5, Math.min(END_HOUR, spkEndDec));
-        const topPercent = ((clampedStart - START_HOUR) / TOTAL_HOURS) * 100;
-        const heightPercent = ((clampedEnd - clampedStart) / TOTAL_HOURS) * 100;
+          for (const day of speakingDays) {
+            const clampedStart = Math.max(START_HOUR, Math.min(END_HOUR, spkStartDec));
+            const clampedEnd = Math.max(clampedStart + 0.5, Math.min(END_HOUR, spkEndDec));
+            const topPercent = ((clampedStart - START_HOUR) / TOTAL_HOURS) * 100;
+            const heightPercent = ((clampedEnd - clampedStart) / TOTAL_HOURS) * 100;
 
-        events.push({
-          id: cls.id,
-          eventKey: `${cls.id}-speaking-${day}`,
-          dayKey: day,
-          type: 'SPEAKING',
-          title: `${cls.name} [Speaking]`,
-          code: cls.code,
-          level: cls.level,
-          book: cls.book,
-          classroom: 'Aula VIRTUAL',
-          modality: 'VIRTUAL',
-          teacherName: cls.speakingTeacher.name,
-          startTime: speakingTimes.startTime,
-          endTime: speakingTimes.endTime,
-          startDecimal: spkStartDec,
-          endDecimal: spkEndDec,
-          startMinutes: Math.round(spkStartDec * 60),
-          endMinutes: Math.round(spkEndDec * 60),
-          topPercent,
-          heightPercent: Math.max(heightPercent, 4),
-          studentsCount: cls.studentsCount,
-          isRecess: cls.status === 'IN_RECESS',
-          rawClass: cls,
-        });
+            events.push({
+              id: cls.id,
+              eventKey: `${cls.id}-speaking-${day}`,
+              dayKey: day,
+              type: 'SPEAKING',
+              title: `${cls.name} [Speaking]`,
+              code: cls.code,
+              level: cls.level,
+              book: cls.book,
+              bookId: cls.bookId,
+              bookColorTheme: cls.bookRef?.colorTheme || null,
+              bookShortName: cls.bookRef?.shortName || null,
+              bookName: cls.bookRef?.name || null,
+              classroom: 'Aula VIRTUAL',
+              modality: 'VIRTUAL',
+              teacherName: cls.speakingTeacher.name,
+              startTime: speakingTimes.startTime,
+              endTime: speakingTimes.endTime,
+              startDecimal: spkStartDec,
+              endDecimal: spkEndDec,
+              startMinutes: Math.round(spkStartDec * 60),
+              endMinutes: Math.round(spkEndDec * 60),
+              topPercent,
+              heightPercent: Math.max(heightPercent, 4),
+              studentsCount: cls.studentsCount,
+              isRecess: cls.status === 'IN_RECESS',
+              rawClass: cls,
+            });
+          }
+        }
       }
     }
   }
 
   // 2. Procesar Clases Privadas (Solo las que caen en la semana activa)
-  if (filterBook === 'ALL' || filterBook === 'PRIVATE') {
-    for (const priv of privateClasses) {
-      if (filterClassroom !== 'ALL' && priv.classroom !== filterClassroom) continue;
-
-      // Obtener YYYY-MM-DD de la clase privada
-      const privDate = new Date(priv.date);
-      const year = privDate.getFullYear();
-      const month = String(privDate.getMonth() + 1).padStart(2, '0');
-      const dayNum = String(privDate.getDate()).padStart(2, '0');
-      const privDateStr = `${year}-${month}-${dayNum}`;
-
-      // Verificar si cae en la semana actual visible
-      const matchedDayKey = weekDateMap.get(privDateStr);
-      if (!matchedDayKey) continue; // No pertenece a la semana activa
-
-      const privStartDec = timeStringToDecimal(priv.startTime);
-      const privEndDec = Math.max(privStartDec + 0.5, timeStringToDecimal(priv.endTime));
-
-      const clampedStart = Math.max(START_HOUR, Math.min(END_HOUR, privStartDec));
-      const clampedEnd = Math.max(clampedStart + 0.5, Math.min(END_HOUR, privEndDec));
-      const topPercent = ((clampedStart - START_HOUR) / TOTAL_HOURS) * 100;
-      const heightPercent = ((clampedEnd - clampedStart) / TOTAL_HOURS) * 100;
-
-      events.push({
-        id: priv.id,
-        eventKey: `private-${priv.id}-${matchedDayKey}`,
-        dayKey: matchedDayKey,
-        type: 'PRIVATE',
-        title: `Privada: ${priv.studentName}`,
-        classroom: priv.classroom,
-        teacherName: priv.teacherName,
-        startTime: priv.startTime,
-        endTime: priv.endTime,
-        startDecimal: privStartDec,
-        endDecimal: privEndDec,
-        startMinutes: Math.round(privStartDec * 60),
-        endMinutes: Math.round(privEndDec * 60),
-        topPercent,
-        heightPercent: Math.max(heightPercent, 4),
-        chargeAmount: priv.chargeAmount,
-        status: priv.status,
-        topic: priv.topic,
-        rawPrivateClass: priv,
-      });
+  for (const priv of privateClasses) {
+    if (filterBook !== 'ALL') {
+      const matchesBook =
+        filterBook === 'PRIVATE' ||
+        priv.bookId === filterBook ||
+        priv.bookRef?.id === filterBook ||
+        priv.bookRef?.name === filterBook ||
+        priv.bookRef?.shortName === filterBook;
+      if (!matchesBook) continue;
     }
+    if (filterClassroom !== 'ALL' && priv.classroom !== filterClassroom) continue;
+
+    // Obtener YYYY-MM-DD de la clase privada
+    const privDate = new Date(priv.date);
+    const year = privDate.getFullYear();
+    const month = String(privDate.getMonth() + 1).padStart(2, '0');
+    const dayNum = String(privDate.getDate()).padStart(2, '0');
+    const privDateStr = `${year}-${month}-${dayNum}`;
+
+    // Verificar si cae en la semana actual visible
+    const matchedDayKey = weekDateMap.get(privDateStr);
+    if (!matchedDayKey) continue; // No pertenece a la semana activa
+
+    const privStartDec = timeStringToDecimal(priv.startTime);
+    const privEndDec = Math.max(privStartDec + 0.5, timeStringToDecimal(priv.endTime));
+
+    const clampedStart = Math.max(START_HOUR, Math.min(END_HOUR, privStartDec));
+    const clampedEnd = Math.max(clampedStart + 0.5, Math.min(END_HOUR, privEndDec));
+    const topPercent = ((clampedStart - START_HOUR) / TOTAL_HOURS) * 100;
+    const heightPercent = ((clampedEnd - clampedStart) / TOTAL_HOURS) * 100;
+
+    events.push({
+      id: priv.id,
+      eventKey: `private-${priv.id}-${matchedDayKey}`,
+      dayKey: matchedDayKey,
+      type: 'PRIVATE',
+      title: `Privada: ${priv.studentName}`,
+      bookId: priv.bookId || null,
+      bookColorTheme: priv.bookRef?.colorTheme || null,
+      bookShortName: priv.bookRef?.shortName || null,
+      bookName: priv.bookRef?.name || null,
+      classroom: priv.classroom,
+      teacherName: priv.teacherName,
+      startTime: priv.startTime,
+      endTime: priv.endTime,
+      startDecimal: privStartDec,
+      endDecimal: privEndDec,
+      startMinutes: Math.round(privStartDec * 60),
+      endMinutes: Math.round(privEndDec * 60),
+      topPercent,
+      heightPercent: Math.max(heightPercent, 4),
+      chargeAmount: priv.chargeAmount,
+      status: priv.status,
+      topic: priv.topic,
+      rawPrivateClass: priv,
+    });
   }
 
   return events;

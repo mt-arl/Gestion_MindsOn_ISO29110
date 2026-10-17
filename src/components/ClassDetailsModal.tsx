@@ -23,6 +23,7 @@ import {
 import { RegularClassSchedule } from '@/actions/schedule';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { buildWhatsAppUrl } from '@/lib/ecuador-validators';
+import { getBookColorStyles } from '@/lib/book-colors';
 
 interface ClassDetailsModalProps {
   isOpen: boolean;
@@ -33,9 +34,8 @@ interface ClassDetailsModalProps {
 export function ClassDetailsModal({ isOpen, onClose, cls }: ClassDetailsModalProps) {
   if (!isOpen || !cls) return null;
 
-  const isAmarillo = cls.book === 'AMARILLO';
-  const isRojo = cls.book === 'ROJO';
-  const isAzul = cls.book === 'AZUL';
+  const colorStyles = getBookColorStyles(cls.bookRef?.colorTheme, cls.book);
+  const bookName = cls.bookRef?.name || (cls.book === 'AMARILLO' ? 'Libro Amarillo' : cls.book === 'ROJO' ? 'Libro Rojo' : 'Libro Azul');
   const isInRecess = cls.status === 'IN_RECESS';
 
   return (
@@ -53,18 +53,10 @@ export function ClassDetailsModal({ isOpen, onClose, cls }: ClassDetailsModalPro
                 Nivel {cls.level}
               </span>
               <span
-                className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-0.5 text-xs font-black border shadow-sm ${
-                  isAmarillo
-                    ? 'bg-amber-50 text-amber-900 border-amber-300'
-                    : isRojo
-                    ? 'bg-rose-50 text-rose-900 border-rose-300'
-                    : 'bg-sky-50 text-sky-900 border-sky-300'
-                }`}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-0.5 text-xs font-black border shadow-sm ${colorStyles.badge}`}
               >
-                <span className={`h-2 w-2 rounded-full shrink-0 ${
-                  isAmarillo ? 'bg-amber-500' : isRojo ? 'bg-rose-500' : 'bg-sky-500'
-                }`} />
-                {isAmarillo ? 'Libro Amarillo' : isRojo ? 'Libro Rojo' : 'Libro Azul'}
+                <span className={`h-2 w-2 rounded-full shrink-0 ${colorStyles.indicator}`} />
+                {bookName}
               </span>
 
               {isInRecess && (
@@ -122,13 +114,13 @@ export function ClassDetailsModal({ isOpen, onClose, cls }: ClassDetailsModalPro
           )}
 
           {/* Docentes y Horarios Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className={`grid grid-cols-1 ${cls.speakingTeacher ? 'sm:grid-cols-2' : ''} gap-4`}>
             {/* Unit Class */}
             <div className="rounded-2xl bg-indigo-50/50 p-4 border border-indigo-100/80 space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-black uppercase text-indigo-700 flex items-center gap-1.5">
                   <BookOpen className="h-4 w-4" />
-                  Unit Class (Presencial / Aula)
+                  {cls.modality === 'PRESENCIAL' ? 'Docente & Horario de Aula' : 'Unit Class (Presencial / Aula)'}
                 </span>
               </div>
               <div className="pt-1">
@@ -147,27 +139,29 @@ export function ClassDetailsModal({ isOpen, onClose, cls }: ClassDetailsModalPro
             </div>
 
             {/* Speaking Class */}
-            <div className="rounded-2xl bg-sky-50/50 p-4 border border-sky-100/80 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-black uppercase text-sky-700 flex items-center gap-1.5">
-                  <MessageSquare className="h-4 w-4" />
-                  Speaking Class (Virtual / Zoom)
-                </span>
-              </div>
-              <div className="pt-1">
-                <p className="text-sm font-bold text-slate-900">
-                  {cls.speakingTeacher.name}
-                </p>
-                <p className="text-xs text-sky-900 font-medium mt-1">
-                  {cls.speakingSchedule}
-                </p>
-                {cls.speakingTeacher.phone && (
-                  <p className="text-[11px] text-slate-500 mt-1">
-                    Contacto: {cls.speakingTeacher.phone}
+            {cls.speakingTeacher && (
+              <div className="rounded-2xl bg-sky-50/50 p-4 border border-sky-100/80 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-black uppercase text-sky-700 flex items-center gap-1.5">
+                    <MessageSquare className="h-4 w-4" />
+                    Speaking Class (Virtual / Zoom)
+                  </span>
+                </div>
+                <div className="pt-1">
+                  <p className="text-sm font-bold text-slate-900">
+                    {cls.speakingTeacher.name}
                   </p>
-                )}
+                  <p className="text-xs text-sky-900 font-medium mt-1">
+                    {cls.speakingSchedule || 'Horario por coordinar'}
+                  </p>
+                  {cls.speakingTeacher.phone && (
+                    <p className="text-[11px] text-slate-500 mt-1">
+                      Contacto: {cls.speakingTeacher.phone}
+                    </p>
+                  )}
+                </div>
               </div>
-            </div>
+            )}
           </div>
 
           {/* Lista de Estudiantes Inscritos */}

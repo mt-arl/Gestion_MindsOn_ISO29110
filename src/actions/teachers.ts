@@ -35,7 +35,7 @@ export type SerializedTeacherDetailed = {
     book: CourseBook;
     modality: ClassModality;
     classroom: string;
-    speakingSchedule: string;
+    speakingSchedule: string | null;
     studentsCount: number;
   }>;
   privateClasses: Array<{

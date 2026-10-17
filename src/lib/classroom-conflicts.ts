@@ -73,7 +73,9 @@ export async function checkClassroomConflictForClass(
     if (newDays.length === 0 || newStart >= newEnd) continue;
 
     for (const existing of existingClasses) {
-      const existingSchedules = [existing.unitSchedule, existing.speakingSchedule].filter(Boolean);
+      const existingSchedules = [existing.unitSchedule, existing.speakingSchedule].filter(
+        (s): s is string => typeof s === 'string' && s.length > 0
+      );
 
       for (const exSched of existingSchedules) {
         const existingDays = extractDaysFromSchedule(exSched);

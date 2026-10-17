@@ -13,6 +13,7 @@ import {
 import { getBookForLevel } from '@/lib/utils';
 import { validateEcuadorianId, validateEcuadorianPhone } from '@/lib/ecuador-validators';
 import { checkClassroomConflictForClass } from '@/lib/classroom-conflicts';
+import { ensureDefaultBooksAndLinkClasses } from '@/actions/books';
 
 export type SerializedTeacher = {
   id: string;
@@ -29,6 +30,14 @@ export type SerializedClass = {
   name: string;
   level: CourseLevel;
   book: CourseBook;
+  bookId: string | null;
+  bookRef: {
+    id: string;
+    name: string;
+    shortName: string;
+    levelsLabel: string | null;
+    colorTheme: string;
+  } | null;
   modality: ClassModality;
   classroom: string;
   classroomId: string | null;
@@ -36,11 +45,11 @@ export type SerializedClass = {
   recessStartedAt: string | null;
   recessReason: string | null;
   unitSchedule: string;
-  speakingSchedule: string;
+  speakingSchedule: string | null;
   unitTeacherId: string;
   unitTeacher: SerializedTeacher;
-  speakingTeacherId: string;
-  speakingTeacher: SerializedTeacher;
+  speakingTeacherId: string | null;
+  speakingTeacher: SerializedTeacher | null;
   studentsCount: number;
   createdAt: string;
 };
@@ -114,9 +123,12 @@ export async function getTeachersList(): Promise<SerializedTeacher[]> {
  */
 export async function getClassesList(): Promise<SerializedClass[]> {
   try {
+    await ensureDefaultBooksAndLinkClasses();
+
     const classes = await prisma.class.findMany({
       include: {
         classroom: true,
+        bookRef: true,
         unitTeacher: true,
         speakingTeacher: true,
         _count: {
@@ -132,6 +144,14 @@ export async function getClassesList(): Promise<SerializedClass[]> {
       name: c.name,
       level: c.level,
       book: c.book,
+      bookId: c.bookId,
+      bookRef: c.bookRef ? {
+        id: c.bookRef.id,
+        name: c.bookRef.name,
+        shortName: c.bookRef.shortName,
+        levelsLabel: c.bookRef.levelsLabel,
+        colorTheme: c.bookRef.colorTheme,
+      } : null,
       modality: c.modality,
       classroom: c.classroom?.name || 'Aula BRAZIL',
       classroomId: c.classroomId,
@@ -149,15 +169,15 @@ export async function getClassesList(): Promise<SerializedClass[]> {
         email: c.unitTeacher.email,
         phone: c.unitTeacher.phone,
       },
-      speakingTeacherId: c.speakingTeacherId,
-      speakingTeacher: {
+      speakingTeacherId: c.speakingTeacherId || null,
+      speakingTeacher: c.speakingTeacher ? {
         id: c.speakingTeacher.id,
         ci: c.speakingTeacher.ci,
         firstName: c.speakingTeacher.firstName,
         lastName: c.speakingTeacher.lastName,
         email: c.speakingTeacher.email,
         phone: c.speakingTeacher.phone,
-      },
+      } : null,
       studentsCount: c._count.students,
       createdAt: c.createdAt.toISOString(),
     }));
@@ -175,19 +195,25 @@ export async function createClassAction(data: {
   name: string;
   level: CourseLevel;
   book?: CourseBook;
+  bookId?: string | null;
   modality: ClassModality;
   classroom?: string;
   classroomId?: string | null;
   unitSchedule: string;
-  speakingSchedule: string;
+  speakingSchedule?: string | null;
   unitTeacherId: string;
-  speakingTeacherId: string;
+  speakingTeacherId?: string | null;
 }): Promise<{ success: boolean; message: string; classId?: string }> {
   try {
     const normalizedCode = data.code?.trim().toUpperCase();
+    const isPresencial = data.modality === ClassModality.PRESENCIAL;
 
-    if (!normalizedCode || !data.name?.trim() || !data.unitTeacherId || !data.speakingTeacherId) {
-      return { success: false, message: 'Código, Nombre, Docente Unit y Docente Speaking son obligatorios.' };
+    if (!normalizedCode || !data.name?.trim() || !data.unitTeacherId) {
+      return { success: false, message: 'Código, Nombre y Docente Unit son obligatorios.' };
+    }
+
+    if (!isPresencial && !data.speakingTeacherId) {
+      return { success: false, message: 'Para cursos virtuales o híbridos, el Docente Speaking es obligatorio.' };
     }
 
     // Validar código único
@@ -215,19 +241,44 @@ export async function createClassAction(data: {
       }
     }
 
+    const effectiveSpeakingSchedule = isPresencial ? undefined : (data.speakingSchedule?.trim() || undefined);
+
     // Validar conflicto de aula física
     if (resolvedClassroomId) {
       const conflictCheck = await checkClassroomConflictForClass(
         resolvedClassroomId,
         data.unitSchedule,
-        data.speakingSchedule
+        effectiveSpeakingSchedule
       );
       if (conflictCheck.hasConflict) {
         return { success: false, message: conflictCheck.message! };
       }
     }
 
-    const assignedBook = data.book || getBookForLevel(data.level);
+    let resolvedBookId = data.bookId || null;
+    let assignedBook = data.book || getBookForLevel(data.level);
+
+    if (resolvedBookId) {
+      const selectedBook = await prisma.book.findUnique({ where: { id: resolvedBookId } });
+      if (selectedBook) {
+        const sName = selectedBook.shortName.toLowerCase();
+        if (sName.includes('amarillo')) assignedBook = CourseBook.AMARILLO;
+        else if (sName.includes('rojo')) assignedBook = CourseBook.ROJO;
+        else if (sName.includes('azul')) assignedBook = CourseBook.AZUL;
+      }
+    } else if (assignedBook) {
+      const matchingBook = await prisma.book.findFirst({
+        where: {
+          OR: [
+            { shortName: { equals: assignedBook === CourseBook.AMARILLO ? 'Amarillo' : assignedBook === CourseBook.ROJO ? 'Rojo' : 'Azul', mode: 'insensitive' } },
+            { name: { contains: assignedBook === CourseBook.AMARILLO ? 'Amarillo' : assignedBook === CourseBook.ROJO ? 'Rojo' : 'Azul', mode: 'insensitive' } },
+          ],
+        },
+      });
+      if (matchingBook) {
+        resolvedBookId = matchingBook.id;
+      }
+    }
 
     const newClass = await prisma.class.create({
       data: {
@@ -235,13 +286,14 @@ export async function createClassAction(data: {
         name: data.name.trim(),
         level: data.level,
         book: assignedBook,
+        bookId: resolvedBookId,
         modality: data.modality,
         classroomId: resolvedClassroomId,
         status: ClassStatus.ACTIVE,
         unitSchedule: data.unitSchedule.trim(),
-        speakingSchedule: data.speakingSchedule.trim(),
+        speakingSchedule: isPresencial ? null : (data.speakingSchedule?.trim() || null),
         unitTeacherId: data.unitTeacherId,
-        speakingTeacherId: data.speakingTeacherId,
+        speakingTeacherId: isPresencial ? null : (data.speakingTeacherId || null),
       },
     });
 
@@ -270,13 +322,14 @@ export async function updateClassAction(
     name: string;
     level: CourseLevel;
     book?: CourseBook;
+    bookId?: string | null;
     modality: ClassModality;
     classroom?: string;
     classroomId?: string | null;
     unitSchedule: string;
-    speakingSchedule: string;
+    speakingSchedule?: string | null;
     unitTeacherId: string;
-    speakingTeacherId: string;
+    speakingTeacherId?: string | null;
   }
 ): Promise<{ success: boolean; message: string }> {
   try {
@@ -285,6 +338,15 @@ export async function updateClassAction(
     }
 
     const normalizedCode = data.code.trim().toUpperCase();
+    const isPresencial = data.modality === ClassModality.PRESENCIAL;
+
+    if (!normalizedCode || !data.name?.trim() || !data.unitTeacherId) {
+      return { success: false, message: 'Código, Nombre y Docente Unit son obligatorios.' };
+    }
+
+    if (!isPresencial && !data.speakingTeacherId) {
+      return { success: false, message: 'Para cursos virtuales o híbridos, el Docente Speaking es obligatorio.' };
+    }
 
     // Validar código único excluyendo esta clase
     const existing = await prisma.class.findFirst({
@@ -314,12 +376,14 @@ export async function updateClassAction(
       }
     }
 
+    const effectiveSpeakingSchedule = isPresencial ? undefined : (data.speakingSchedule?.trim() || undefined);
+
     // Validar conflicto de aula física
     if (resolvedClassroomId) {
       const conflictCheck = await checkClassroomConflictForClass(
         resolvedClassroomId,
         data.unitSchedule,
-        data.speakingSchedule,
+        effectiveSpeakingSchedule,
         classId
       );
       if (conflictCheck.hasConflict) {
@@ -327,7 +391,32 @@ export async function updateClassAction(
       }
     }
 
-    const assignedBook = data.book || getBookForLevel(data.level);
+    let resolvedBookId = data.bookId !== undefined ? data.bookId : undefined;
+    let assignedBook = data.book || getBookForLevel(data.level);
+
+    if (resolvedBookId) {
+      const selectedBook = await prisma.book.findUnique({ where: { id: resolvedBookId } });
+      if (selectedBook) {
+        const sName = selectedBook.shortName.toLowerCase();
+        if (sName.includes('amarillo')) assignedBook = CourseBook.AMARILLO;
+        else if (sName.includes('rojo')) assignedBook = CourseBook.ROJO;
+        else if (sName.includes('azul')) assignedBook = CourseBook.AZUL;
+      }
+    } else if (resolvedBookId === null && !data.book) {
+      assignedBook = getBookForLevel(data.level);
+    } else if (resolvedBookId === undefined && assignedBook) {
+      const matchingBook = await prisma.book.findFirst({
+        where: {
+          OR: [
+            { shortName: { equals: assignedBook === CourseBook.AMARILLO ? 'Amarillo' : assignedBook === CourseBook.ROJO ? 'Rojo' : 'Azul', mode: 'insensitive' } },
+            { name: { contains: assignedBook === CourseBook.AMARILLO ? 'Amarillo' : assignedBook === CourseBook.ROJO ? 'Rojo' : 'Azul', mode: 'insensitive' } },
+          ],
+        },
+      });
+      if (matchingBook) {
+        resolvedBookId = matchingBook.id;
+      }
+    }
 
     const updated = await prisma.class.update({
       where: { id: classId },
@@ -336,12 +425,13 @@ export async function updateClassAction(
         name: data.name.trim(),
         level: data.level,
         book: assignedBook,
+        ...(resolvedBookId !== undefined ? { bookId: resolvedBookId } : {}),
         modality: data.modality,
         classroomId: resolvedClassroomId,
         unitSchedule: data.unitSchedule.trim(),
-        speakingSchedule: data.speakingSchedule.trim(),
+        speakingSchedule: isPresencial ? null : (data.speakingSchedule?.trim() || null),
         unitTeacherId: data.unitTeacherId,
-        speakingTeacherId: data.speakingTeacherId,
+        speakingTeacherId: isPresencial ? null : (data.speakingTeacherId || null),
       },
     });
 
@@ -795,6 +885,7 @@ export async function updateStudentAction(
     invoiceAddress?: string | null;
     invoicePhone?: string | null;
     currentClassId?: string | null;
+    customNextPaymentDate?: string | null;
   }
 ): Promise<{ success: boolean; message: string }> {
   try {
@@ -870,32 +961,74 @@ export async function updateStudentAction(
       return { success: false, message: `El correo "${emailClean}" ya está en uso por otro estudiante.` };
     }
 
-    const updatedStudent = await prisma.student.update({
-      where: { id: studentId },
-      data: {
-        ci: ciClean,
-        firstName: firstNameClean,
-        lastName: lastNameClean,
-        email: emailClean,
-        phone: phoneClean,
-        guardianPhone1: data.guardianPhone1?.trim() || null,
-        guardianPhone2: data.guardianPhone2?.trim() || null,
-        age: Number(data.age) || 18,
-        gender: data.gender || 'No especificado',
-        address: data.address?.trim() || null,
-        status: data.status,
-        monthlyFee: data.monthlyFee,
-        hasDisability: Boolean(data.hasDisability),
-        disabilityDescription: data.hasDisability ? (data.disabilityDescription?.trim() || null) : null,
-        notes: data.notes?.trim() || null,
-        invoiceIdType: data.invoiceIdType || 'CEDULA',
-        invoiceIdNumber: data.invoiceIdNumber?.trim() || null,
-        invoiceName: data.invoiceName?.trim() || null,
-        invoiceEmail: data.invoiceEmail?.trim() || null,
-        invoiceAddress: data.invoiceAddress?.trim() || null,
-        invoicePhone: data.invoicePhone?.trim() || null,
-        currentClassId: data.currentClassId?.trim() || null,
-      },
+    let parsedCustomDate: Date | null = null;
+    if (data.customNextPaymentDate && data.customNextPaymentDate.trim()) {
+      const parts = data.customNextPaymentDate.trim().split('-');
+      if (parts.length === 3) {
+        const y = parseInt(parts[0], 10);
+        const m = parseInt(parts[1], 10);
+        const d = parseInt(parts[2], 10);
+        parsedCustomDate = new Date(y, m - 1, d, 12, 0, 0);
+      } else {
+        parsedCustomDate = new Date(data.customNextPaymentDate);
+      }
+    }
+
+    const updatedStudent = await prisma.$transaction(async (tx) => {
+      const student = await tx.student.update({
+        where: { id: studentId },
+        data: {
+          ci: ciClean,
+          firstName: firstNameClean,
+          lastName: lastNameClean,
+          email: emailClean,
+          phone: phoneClean,
+          guardianPhone1: data.guardianPhone1?.trim() || null,
+          guardianPhone2: data.guardianPhone2?.trim() || null,
+          age: Number(data.age) || 18,
+          gender: data.gender || 'No especificado',
+          address: data.address?.trim() || null,
+          status: data.status,
+          monthlyFee: data.monthlyFee,
+          hasDisability: Boolean(data.hasDisability),
+          disabilityDescription: data.hasDisability ? (data.disabilityDescription?.trim() || null) : null,
+          notes: data.notes?.trim() || null,
+          invoiceIdType: data.invoiceIdType || 'CEDULA',
+          invoiceIdNumber: data.invoiceIdNumber?.trim() || null,
+          invoiceName: data.invoiceName?.trim() || null,
+          invoiceEmail: data.invoiceEmail?.trim() || null,
+          invoiceAddress: data.invoiceAddress?.trim() || null,
+          invoicePhone: data.invoicePhone?.trim() || null,
+          currentClassId: data.currentClassId?.trim() || null,
+          ...(parsedCustomDate ? { nextPaymentDate: parsedCustomDate } : {}),
+        },
+      });
+
+      // 3. Sincronización Crítica de la Cuota Pendiente (TuitionFee)
+      if (parsedCustomDate) {
+        const pendingFee = await tx.tuitionFee.findFirst({
+          where: {
+            studentId: studentId,
+            status: { in: [TuitionFeeStatus.PENDING, TuitionFeeStatus.OVERDUE] },
+          },
+          orderBy: { dueDate: 'asc' },
+        });
+
+        if (pendingFee) {
+          const isNowOverdue = parsedCustomDate < new Date();
+          await tx.tuitionFee.update({
+            where: { id: pendingFee.id },
+            data: {
+              dueDate: parsedCustomDate,
+              month: parsedCustomDate.getMonth() + 1,
+              year: parsedCustomDate.getFullYear(),
+              status: isNowOverdue ? TuitionFeeStatus.OVERDUE : TuitionFeeStatus.PENDING,
+            },
+          });
+        }
+      }
+
+      return student;
     });
 
     revalidatePath('/students');
@@ -903,9 +1036,13 @@ export async function updateStudentAction(
     revalidatePath('/schedule');
     revalidatePath('/');
 
+    const dateNotice = parsedCustomDate
+      ? ` Próximo pago actualizado al ${parsedCustomDate.toLocaleDateString('es-ES')}.`
+      : '';
+
     return {
       success: true,
-      message: `Estudiante ${updatedStudent.firstName} ${updatedStudent.lastName} actualizado exitosamente.`,
+      message: `Estudiante ${updatedStudent.firstName} ${updatedStudent.lastName} actualizado exitosamente.${dateNotice}`,
     };
   } catch (error) {
     console.error('Error al actualizar estudiante:', error);

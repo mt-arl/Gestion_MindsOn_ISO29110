@@ -30,6 +30,13 @@ export type RegularClassSchedule = {
   name: string;
   level: CourseLevel;
   book: CourseBook;
+  bookId: string | null;
+  bookRef: {
+    id: string;
+    name: string;
+    shortName: string;
+    colorTheme: string;
+  } | null;
   modality: ClassModality;
   classroomId: string | null;
   classroom: string;
@@ -37,7 +44,7 @@ export type RegularClassSchedule = {
   recessStartedAt: string | null;
   recessReason: string | null;
   unitSchedule: string;
-  speakingSchedule: string;
+  speakingSchedule: string | null;
   unitTeacher: {
     id: string;
     name: string;
@@ -47,7 +54,7 @@ export type RegularClassSchedule = {
     id: string;
     name: string;
     phone: string;
-  };
+  } | null;
   studentsCount: number;
   students: EnrolledStudentSummary[];
 };
@@ -59,6 +66,13 @@ export type PrivateClassSchedule = {
   teacherId: string;
   teacherName: string;
   teacherPhone: string;
+  bookId: string | null;
+  bookRef: {
+    id: string;
+    name: string;
+    shortName: string;
+    colorTheme: string;
+  } | null;
   date: string;
   startTime: string;
   endTime: string;
@@ -84,6 +98,7 @@ export async function getWeeklyScheduleAction(): Promise<WeeklyScheduleData> {
       prisma.class.findMany({
         include: {
           classroom: true,
+          bookRef: true,
           unitTeacher: true,
           speakingTeacher: true,
           students: {
@@ -110,6 +125,7 @@ export async function getWeeklyScheduleAction(): Promise<WeeklyScheduleData> {
           classroom: true,
           teacher: true,
           student: true,
+          bookRef: true,
         },
         orderBy: [
           { date: 'desc' },
@@ -125,6 +141,13 @@ export async function getWeeklyScheduleAction(): Promise<WeeklyScheduleData> {
         name: c.name,
         level: c.level,
         book: c.book,
+        bookId: c.bookId,
+        bookRef: c.bookRef ? {
+          id: c.bookRef.id,
+          name: c.bookRef.name,
+          shortName: c.bookRef.shortName,
+          colorTheme: c.bookRef.colorTheme,
+        } : null,
         modality: c.modality,
         classroomId: c.classroomId,
         classroom: c.classroom?.name || 'Aula BRAZIL',
@@ -132,17 +155,17 @@ export async function getWeeklyScheduleAction(): Promise<WeeklyScheduleData> {
         recessStartedAt: c.recessStartedAt ? c.recessStartedAt.toISOString() : null,
         recessReason: c.recessReason,
         unitSchedule: c.unitSchedule,
-        speakingSchedule: c.speakingSchedule,
+        speakingSchedule: c.speakingSchedule || null,
         unitTeacher: {
           id: c.unitTeacher.id,
           name: `${c.unitTeacher.firstName} ${c.unitTeacher.lastName}`,
           phone: c.unitTeacher.phone,
         },
-        speakingTeacher: {
+        speakingTeacher: c.speakingTeacher ? {
           id: c.speakingTeacher.id,
           name: `${c.speakingTeacher.firstName} ${c.speakingTeacher.lastName}`,
           phone: c.speakingTeacher.phone,
-        },
+        } : null,
         studentsCount: c.students.length,
         students: c.students.map((s) => ({
           id: s.id,
@@ -164,6 +187,13 @@ export async function getWeeklyScheduleAction(): Promise<WeeklyScheduleData> {
         teacherId: p.teacherId,
         teacherName: `${p.teacher.firstName} ${p.teacher.lastName}`,
         teacherPhone: p.teacher.phone,
+        bookId: p.bookId || null,
+        bookRef: p.bookRef ? {
+          id: p.bookRef.id,
+          name: p.bookRef.name,
+          shortName: p.bookRef.shortName,
+          colorTheme: p.bookRef.colorTheme,
+        } : null,
         date: p.date.toISOString(),
         startTime: p.startTime,
         endTime: p.endTime,
@@ -188,6 +218,7 @@ export async function createPrivateClassAction(data: {
   studentName: string;
   studentId?: string | null;
   teacherId: string;
+  bookId?: string | null;
   date: string;
   startTime: string;
   endTime: string;
@@ -252,6 +283,7 @@ export async function createPrivateClassAction(data: {
         studentName: data.studentName.trim(),
         studentId: data.studentId?.trim() || null,
         teacherId: data.teacherId,
+        bookId: data.bookId?.trim() || null,
         date: scheduledDate,
         startTime: data.startTime.trim(),
         endTime: data.endTime.trim(),

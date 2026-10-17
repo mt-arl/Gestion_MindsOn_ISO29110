@@ -1,6 +1,5 @@
 'use client';
-
-import React, { useState } from 'react';
+import React, { useState, useTransition } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
@@ -16,16 +15,22 @@ import {
   Menu,
   X,
   Clock,
-  Layers
+  Layers,
+  LogOut,
+  Loader2
 } from 'lucide-react';
 import { formatDate } from '@/lib/utils';
 import { GenerateTuitionsModal } from './GenerateTuitionsModal';
+import { logoutAction } from '@/actions/auth';
 
 export function Header() {
   const pathname = usePathname();
   const today = new Date();
   const [isGenerateModalOpen, setIsGenerateModalOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isLoggingOut, startLogoutTransition] = useTransition();
+
+  if (pathname === '/login') return null;
 
   const navLinks = [
     {
@@ -122,11 +127,29 @@ export function Header() {
               <span className="capitalize">{formatDate(today)}</span>
             </div>
 
-            {/* Admin Badge */}
-            <div className="hidden sm:flex items-center gap-1.5 rounded-xl bg-slate-900 px-3 py-1.5 text-white shadow-xs border border-slate-800">
-              <div className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            {/* Admin Badge & Logout */}
+            <div className="hidden sm:flex items-center gap-1.5 rounded-xl bg-slate-900 pl-2.5 pr-1 py-1 text-white shadow-xs border border-slate-800">
+              <div className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
               <span className="text-[10px] font-black uppercase text-slate-300">ADMIN</span>
-              <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
+              <ShieldCheck className="h-3.5 w-3.5 text-emerald-400 mr-0.5 shrink-0" />
+              <button
+                type="button"
+                onClick={() => {
+                  startLogoutTransition(async () => {
+                    await logoutAction();
+                  });
+                }}
+                disabled={isLoggingOut}
+                className="inline-flex items-center gap-1 rounded-lg bg-slate-800 hover:bg-rose-950/80 hover:text-rose-300 text-slate-300 px-2 py-1 text-[10px] font-bold transition-all border border-slate-700/60 hover:border-rose-500/40 cursor-pointer disabled:opacity-60"
+                title="Cerrar sesión"
+              >
+                {isLoggingOut ? (
+                  <Loader2 className="h-3 w-3 animate-spin text-rose-400" />
+                ) : (
+                  <LogOut className="h-3 w-3 text-slate-400 group-hover:text-rose-400" />
+                )}
+                <span>Salir</span>
+              </button>
             </div>
 
             {/* Mobile Hamburger Button (Visible on < md) */}
@@ -210,8 +233,8 @@ export function Header() {
               </div>
             </div>
 
-            {/* Drawer Bottom Info */}
-            <div className="border-t border-slate-100 pt-4 space-y-2">
+            {/* Drawer Bottom Info & Logout */}
+            <div className="border-t border-slate-100 pt-4 space-y-3">
               <div className="flex items-center justify-between text-[11px] text-slate-500 font-medium">
                 <span className="flex items-center gap-1">
                   <Clock className="h-3 w-3 text-slate-400" />
@@ -222,6 +245,26 @@ export function Header() {
                   Admin
                 </span>
               </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setIsMobileMenuOpen(false);
+                  startLogoutTransition(async () => {
+                    await logoutAction();
+                  });
+                }}
+                disabled={isLoggingOut}
+                className="w-full flex items-center justify-center gap-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200/80 py-2.5 text-xs font-bold transition-all cursor-pointer disabled:opacity-60"
+              >
+                {isLoggingOut ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <LogOut className="h-3.5 w-3.5" />
+                )}
+                <span>Cerrar Sesión</span>
+              </button>
+
               <p className="text-[10px] text-slate-400 text-center font-medium">
                 MindsOn Instituto de Inglés • v1.0
               </p>
