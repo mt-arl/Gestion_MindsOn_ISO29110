@@ -1,5 +1,6 @@
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { TUITION_TIME_ZONE, tuitionDaysUntil } from '@/lib/tuition-dates';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -22,13 +23,18 @@ export function formatCurrency(amount: number | string | { toString(): string } 
 /**
  * Formatea una fecha a formato legible en español
  */
-export function formatDate(date: Date | string): string {
+export function formatDate(date: Date | string, timeZone?: string): string {
   const d = typeof date === 'string' ? new Date(date) : date;
   return new Intl.DateTimeFormat('es-ES', {
     day: '2-digit',
     month: 'short',
     year: 'numeric',
+    timeZone,
   }).format(d);
+}
+
+export function formatTuitionDate(date: Date | string): string {
+  return formatDate(date, TUITION_TIME_ZONE);
 }
 
 /**
@@ -36,13 +42,7 @@ export function formatDate(date: Date | string): string {
  * Si es negativo, significa que ya pasaron X días (vencido).
  */
 export function getDaysDiffFromNow(dueDate: Date | string): number {
-  const target = new Date(dueDate);
-  const now = new Date();
-  // Normalizar a medianoche para comparar solo fechas
-  target.setHours(0, 0, 0, 0);
-  now.setHours(0, 0, 0, 0);
-  const diffTime = target.getTime() - now.getTime();
-  return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  return tuitionDaysUntil(new Date(dueDate), new Date());
 }
 
 /**

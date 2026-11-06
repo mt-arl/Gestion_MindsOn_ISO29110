@@ -134,6 +134,7 @@ model Student {
   guardianPhone2  String?
   enrollmentDate  DateTime      @default(now())
   nextPaymentDate DateTime?
+  tuitionSyncedThrough DateTime? @db.Date
   age             Int
   gender          String
   address         String?

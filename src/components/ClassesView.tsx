@@ -93,7 +93,7 @@ export function ClassesView({ initialClasses, teachers }: ClassesViewProps) {
 
   const handleResumeClass = (cls: SerializedClass) => {
     const confirmResume = window.confirm(
-      `¿Reactivar el curso "${cls.name}" (${cls.code})?\n\nAl reactivar la clase:\n1. El estado del curso volverá a ACTIVO.\n2. La fecha de próximo pago de todos sus alumnos activos se fijará a 1 mes a partir de hoy.\n3. Se generará su nueva cuota pendiente para el nuevo ciclo de clases.\n\n¿Deseas continuar?`
+      `¿Reactivar el curso "${cls.name}" (${cls.code})?\n\nAl reactivar la clase:\n1. El estado del curso volverá a ACTIVO.\n2. Cada alumno retomará su calendario mensual según su día de matrícula.\n3. Las cuotas pendientes anteriores seguirán registradas.\n\n¿Deseas continuar?`
     );
 
     if (!confirmResume) return;

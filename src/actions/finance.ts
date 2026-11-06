@@ -9,7 +9,10 @@ import {
   ClassModality,
   ClassStatus 
 } from '@prisma/client';
-import { getMonthName, formatDate } from '@/lib/utils';
+import { getMonthName, formatTuitionDate } from '@/lib/utils';
+import { requireAuth } from '@/lib/require-auth';
+import { issueMonthlyTuitions, syncMonthlyTuitions, withTuitionTransaction } from '@/lib/tuition-billing';
+import { tuitionDay, tuitionPeriodKey, upcomingTuitionDate, type TuitionPeriod } from '@/lib/tuition-dates';
 
 export type SerializedTuitionFee = {
   id: string;
@@ -20,6 +23,7 @@ export type SerializedTuitionFee = {
   dueDate: string;
   amount: number;
   status: TuitionFeeStatus;
+  blockedByPeriod: TuitionPeriod | null;
   createdAt: string;
   updatedAt: string;
   student: {
@@ -127,48 +131,22 @@ export type StudentFinancialHistory = {
   fees: SerializedTuitionFee[];
 };
 
-/**
- * 1. Sincroniza automáticamente a estado OVERDUE todas las mensualidades
- * que estén PENDING y cuya fecha límite (dueDate) ya haya pasado.
- */
-export async function checkAndSyncOverdueFees(): Promise<{ updatedCount: number }> {
-  try {
-    const now = new Date();
-
-    // Obtener cuotas PENDING vencidas cuyas clases NO estén en receso
-    const feesToOverdue = await prisma.tuitionFee.findMany({
-      where: {
-        status: TuitionFeeStatus.PENDING,
-        dueDate: {
-          lt: now,
-        },
-        class: {
-          status: { not: ClassStatus.IN_RECESS },
-        },
-      },
-      select: { id: true },
-    });
-
-    if (feesToOverdue.length === 0) {
-      return { updatedCount: 0 };
+function oldestUnpaidByStudent(fees: readonly (TuitionPeriod & { studentId: string; status: TuitionFeeStatus })[]) {
+  const oldest = new Map<string, TuitionPeriod>();
+  for (const fee of fees) {
+    if (fee.status === TuitionFeeStatus.PAID) continue;
+    const previous = oldest.get(fee.studentId);
+    if (!previous || tuitionPeriodKey(fee) < tuitionPeriodKey(previous)) {
+      oldest.set(fee.studentId, { month: fee.month, year: fee.year });
     }
-
-    const result = await prisma.tuitionFee.updateMany({
-      where: {
-        id: {
-          in: feesToOverdue.map((f) => f.id),
-        },
-      },
-      data: {
-        status: TuitionFeeStatus.OVERDUE,
-      },
-    });
-
-    return { updatedCount: result.count };
-  } catch (error) {
-    console.error('Error sincronizando mensualidades vencidas:', error);
-    return { updatedCount: 0 };
   }
+  return oldest;
+}
+
+function blockingPeriod(fee: TuitionPeriod & { status: TuitionFeeStatus }, oldest?: TuitionPeriod) {
+  return fee.status !== TuitionFeeStatus.PAID && oldest && tuitionPeriodKey(oldest) < tuitionPeriodKey(fee)
+    ? oldest
+    : null;
 }
 
 /**
@@ -178,18 +156,17 @@ export async function getFinancialDashboardData(
   month?: number,
   year?: number
 ): Promise<FinancialDashboardData> {
-  // Sincronizar vencimientos antes de calcular
-  await checkAndSyncOverdueFees();
+  await requireAuth();
+  // Emitir las cuotas del periodo y actualizar vencimientos antes de calcular
+  await syncMonthlyTuitions();
 
-  const whereClause: any = {};
-  if (typeof month === 'number' && month >= 1 && month <= 12 && typeof year === 'number' && year >= 2020) {
-    whereClause.month = month;
-    whereClause.year = year;
-  }
+  const period = typeof month === 'number' && month >= 1 && month <= 12 && typeof year === 'number' && year >= 2020
+    ? { month, year }
+    : undefined;
 
   // Consultar mensualidades con relaciones completas
   const tuitionFees = await prisma.tuitionFee.findMany({
-    where: Object.keys(whereClause).length > 0 ? whereClause : undefined,
+    where: period,
     include: {
       student: true,
       class: {
@@ -244,6 +221,18 @@ export async function getFinancialDashboardData(
   const totalBilled = totalPaid + totalPending + totalOverdue;
   const collectionRate = totalBilled > 0 ? (totalPaid / totalBilled) * 100 : 0;
 
+  const earlierUnpaid = period && tuitionFees.length > 0
+    ? await prisma.tuitionFee.findMany({
+        where: {
+          studentId: { in: [...new Set(tuitionFees.map((fee) => fee.studentId))] },
+          status: { not: TuitionFeeStatus.PAID },
+          OR: [{ year: { lt: period.year } }, { year: period.year, month: { lt: period.month } }],
+        },
+        select: { studentId: true, year: true, month: true, status: true },
+      })
+    : [];
+  const oldestUnpaid = oldestUnpaidByStudent([...tuitionFees, ...earlierUnpaid]);
+
   // Serializar datos para evitar errores de Client Components con objetos Prisma Decimal / Date
   const serializedFees: SerializedTuitionFee[] = tuitionFees.map((fee) => ({
     id: fee.id,
@@ -254,6 +243,7 @@ export async function getFinancialDashboardData(
     dueDate: fee.dueDate.toISOString(),
     amount: Number(fee.amount),
     status: fee.status,
+    blockedByPeriod: blockingPeriod(fee, oldestUnpaid.get(fee.studentId)),
     createdAt: fee.createdAt.toISOString(),
     updatedAt: fee.updatedAt.toISOString(),
     student: {
@@ -371,53 +361,68 @@ export async function registerPaymentAction(
   invoiceNumber?: string | null
 ): Promise<{ success: boolean; message: string; paymentId?: string }> {
   try {
+    await requireAuth();
     if (!tuitionFeeId) {
       return { success: false, message: 'Identificador de mensualidad no proporcionado.' };
     }
 
-    const fee = await prisma.tuitionFee.findUnique({
-      where: { id: tuitionFeeId },
-      include: { student: true },
-    });
+    const result = await withTuitionTransaction(async (tx) => {
+      const fee = await tx.tuitionFee.findUnique({
+        where: { id: tuitionFeeId },
+        include: { student: true },
+      });
+      if (!fee) {
+        return { success: false, message: 'La mensualidad seleccionada no existe en el sistema.' };
+      }
+      if (fee.status === TuitionFeeStatus.PAID) {
+        return { success: false, message: 'Esta mensualidad ya figura como pagada.' };
+      }
 
-    if (!fee) {
-      return { success: false, message: 'La mensualidad seleccionada no existe en el sistema.' };
-    }
+      const now = new Date();
+      await issueMonthlyTuitions(tx, now, { id: fee.studentId });
+      const earlierFee = await tx.tuitionFee.findFirst({
+        where: {
+          studentId: fee.studentId,
+          status: { not: TuitionFeeStatus.PAID },
+          OR: [{ year: { lt: fee.year } }, { year: fee.year, month: { lt: fee.month } }],
+        },
+        orderBy: [{ year: 'asc' }, { month: 'asc' }],
+        select: { year: true, month: true },
+      });
+      if (earlierFee) {
+        return {
+          success: false,
+          message: `Primero registra el pago de ${getMonthName(earlierFee.month)} ${earlierFee.year}.`,
+        };
+      }
 
-    if (fee.status === TuitionFeeStatus.PAID) {
-      return { success: false, message: 'Esta mensualidad ya figura como pagada.' };
-    }
-
-    // Transacción atómica
-    const createdPayment = await prisma.$transaction(async (tx) => {
-      // 1. Actualizar estado de TuitionFee a PAID
       await tx.tuitionFee.update({
         where: { id: tuitionFeeId },
-        data: {
-          status: TuitionFeeStatus.PAID,
-        },
+        data: { status: TuitionFeeStatus.PAID },
       });
-
-      // 2. Crear registro de pago
-      return await tx.payment.create({
+      const payment = await tx.payment.create({
         data: {
           tuitionFeeId: fee.id,
           amountPaid: fee.amount,
-          paymentDate: new Date(),
+          paymentDate: now,
           registeredBy: 'Administración MindsOn',
           notes: notes?.trim() || 'Pago regular registrado desde el panel de cobranza',
           invoiceNumber: invoiceNumber?.trim() || null,
         },
       });
+
+      return {
+        success: true,
+        message: `Pago de $${Number(fee.amount).toFixed(2)} para ${fee.student.firstName} ${fee.student.lastName} registrado exitosamente.`,
+        paymentId: payment.id,
+      };
     });
 
-    revalidatePath('/');
-    revalidatePath('/students');
-    return {
-      success: true,
-      message: `Pago de $${Number(fee.amount).toFixed(2)} para ${fee.student.firstName} ${fee.student.lastName} registrado exitosamente.`,
-      paymentId: createdPayment.id,
-    };
+    if (result.success) {
+      revalidatePath('/');
+      revalidatePath('/students');
+    }
+    return result;
   } catch (error) {
     console.error('Error al registrar pago:', error);
     return {
@@ -434,6 +439,7 @@ export async function getPaymentReceiptDataAction(
   identifier: string
 ): Promise<{ success: boolean; data?: PaymentReceiptData; message?: string }> {
   try {
+    await requireAuth();
     if (!identifier) {
       return { success: false, message: 'Identificador de pago no proporcionado.' };
     }
@@ -560,12 +566,13 @@ export async function getStudentFinancialHistory(
   studentId: string
 ): Promise<{ success: boolean; data?: StudentFinancialHistory; message?: string }> {
   try {
+    await requireAuth();
     if (!studentId) {
       return { success: false, message: 'ID de estudiante no proporcionado.' };
     }
 
-    // Sincronizar vencimientos
-    await checkAndSyncOverdueFees();
+    // Emitir las cuotas del periodo y actualizar vencimientos
+    await syncMonthlyTuitions();
 
     const student = await prisma.student.findUnique({
       where: { id: studentId },
@@ -617,6 +624,7 @@ export async function getStudentFinancialHistory(
       }
     }
 
+    const oldestUnpaid = oldestUnpaidByStudent(student.tuitionFees);
     const serializedFees: SerializedTuitionFee[] = student.tuitionFees.map((fee) => ({
       id: fee.id,
       studentId: fee.studentId,
@@ -626,6 +634,7 @@ export async function getStudentFinancialHistory(
       dueDate: fee.dueDate.toISOString(),
       amount: Number(fee.amount),
       status: fee.status,
+      blockedByPeriod: blockingPeriod(fee, oldestUnpaid.get(fee.studentId)),
       createdAt: fee.createdAt.toISOString(),
       updatedAt: fee.updatedAt.toISOString(),
       student: {
@@ -738,6 +747,8 @@ export type StudentBreakdownInCourse = {
   notes: string | null;
   monthlyFee: number;
   nextPaymentDate: string | null;
+  outstandingBalance: number;
+  unpaidFeesCount: number;
   contextualStatus: 'PAUSED' | 'OVERDUE' | 'PENDING' | 'PAID' | 'FUTURE_ENROLLMENT' | 'UNISSUED';
   statusLabel: string;
   feeStatus: TuitionFeeStatus | 'UNISSUED';
@@ -806,11 +817,13 @@ export async function getCourseFinanceBreakdownAction(
   year?: number
 ): Promise<CourseFinanceBreakdownResponse> {
   try {
-    await checkAndSyncOverdueFees();
+    await requireAuth();
+    await syncMonthlyTuitions();
 
     const now = new Date();
-    const targetMonth = month || now.getMonth() + 1;
-    const targetYear = year || now.getFullYear();
+    const today = tuitionDay(now);
+    const targetMonth = month || today.getUTCMonth() + 1;
+    const targetYear = year || today.getUTCFullYear();
 
     const classes = await prisma.class.findMany({
       include: {
@@ -823,6 +836,7 @@ export async function getCourseFinanceBreakdownAction(
             tuitionFees: {
               include: {
                 payments: true,
+                class: { include: { classroom: true } },
               },
               orderBy: [
                 { year: 'desc' },
@@ -856,58 +870,49 @@ export async function getCourseFinanceBreakdownAction(
         const monthlyFeeNum = Number(student.monthlyFee);
         courseProjected += monthlyFeeNum;
 
-        // 1. Identificar cuotas por prioridad: OVERDUE más antigua > PENDING más cercana > PAID más reciente
-        const overdueFees = student.tuitionFees
-          .filter((f) => f.status === TuitionFeeStatus.OVERDUE)
-          .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
-
-        const pendingFees = student.tuitionFees
-          .filter((f) => f.status === TuitionFeeStatus.PENDING)
-          .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
-
+        const unpaidFees = student.tuitionFees
+          .filter((fee) => fee.status !== TuitionFeeStatus.PAID)
+          .sort((a, b) => tuitionPeriodKey(a) - tuitionPeriodKey(b) || a.dueDate.getTime() - b.dueDate.getTime());
+        const overdueFees = unpaidFees.filter((fee) => fee.status === TuitionFeeStatus.OVERDUE);
+        const pendingFees = unpaidFees.filter((fee) => fee.status === TuitionFeeStatus.PENDING);
         const paidFees = student.tuitionFees
-          .filter((f) => f.status === TuitionFeeStatus.PAID)
-          .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+          .filter((fee) => fee.status === TuitionFeeStatus.PAID)
+          .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
 
-        // Seleccionar la cuota más relevante para la acción
-        let selectedFee = overdueFees[0] || pendingFees[0] || paidFees[0] || null;
+        const selectedFee = unpaidFees[0] || paidFees[0] || null;
+        const outstandingBalance = unpaidFees.reduce((sum, fee) => sum + Number(fee.amount), 0);
+        const nextPaymentDate = cls.status === ClassStatus.ACTIVE
+          ? upcomingTuitionDate(student.enrollmentDate, now, student.tuitionFees)
+          : null;
+        coursePendingOrOverdue += outstandingBalance;
+        courseCollected += paidFees
+          .filter((fee) => fee.classId === cls.id && fee.month === targetMonth && fee.year === targetYear)
+          .reduce((sum, fee) => sum + Number(fee.amount), 0);
 
-        // 2. Determinar estado contextual
         let contextualStatus: StudentBreakdownInCourse['contextualStatus'] = 'UNISSUED';
         let statusLabel = 'Sin emitir';
 
         if (isClassInRecess) {
           contextualStatus = 'PAUSED';
           statusLabel = '⏸️ Curso en Receso';
-          coursePendingOrOverdue += monthlyFeeNum;
           unissuedCount++;
         } else if (overdueFees.length > 0) {
           contextualStatus = 'OVERDUE';
-          const feeOverdue = overdueFees[0];
-          statusLabel = `⚠️ En Mora (${getMonthName(feeOverdue.month)})`;
-          coursePendingOrOverdue += Number(feeOverdue.amount);
+          statusLabel = `⚠️ En Mora (${getMonthName(overdueFees[0].month)})`;
           overdueCount++;
         } else if (pendingFees.length > 0) {
           contextualStatus = 'PENDING';
-          const feePending = pendingFees[0];
-          statusLabel = `⏳ Vence el ${formatDate(feePending.dueDate)}`;
-          coursePendingOrOverdue += Number(feePending.amount);
+          statusLabel = `⏳ Vence el ${formatTuitionDate(pendingFees[0].dueDate)}`;
           pendingCount++;
         } else if (paidFees.length > 0) {
           contextualStatus = 'PAID';
           statusLabel = '✓ Al Día';
-          const feePaid = paidFees[0];
-          courseCollected += Number(feePaid.amount);
           paidCount++;
-        } else if (student.nextPaymentDate) {
+        } else if (nextPaymentDate) {
           contextualStatus = 'FUTURE_ENROLLMENT';
-          statusLabel = `🗓️ Próx. Cobro: ${formatDate(student.nextPaymentDate)}`;
-          coursePendingOrOverdue += monthlyFeeNum;
+          statusLabel = `🗓️ Próx. Cobro: ${formatTuitionDate(nextPaymentDate)}`;
           unissuedCount++;
         } else {
-          contextualStatus = 'UNISSUED';
-          statusLabel = 'Sin emitir';
-          coursePendingOrOverdue += monthlyFeeNum;
           unissuedCount++;
         }
 
@@ -917,12 +922,13 @@ export async function getCourseFinanceBreakdownAction(
           rawFee = {
             id: selectedFee.id,
             studentId: student.id,
-            classId: cls.id,
+            classId: selectedFee.classId,
             month: selectedFee.month,
             year: selectedFee.year,
             dueDate: selectedFee.dueDate.toISOString(),
             amount: Number(selectedFee.amount),
             status: selectedFee.status,
+            blockedByPeriod: null,
             createdAt: selectedFee.createdAt.toISOString(),
             updatedAt: selectedFee.updatedAt.toISOString(),
             student: {
@@ -939,15 +945,15 @@ export async function getCourseFinanceBreakdownAction(
               monthlyFee: Number(student.monthlyFee),
             },
             class: {
-              id: cls.id,
-              code: cls.code,
-              name: cls.name,
-              level: cls.level,
-              book: cls.book,
-              modality: cls.modality,
-              classroom: cls.classroom?.name || 'Aula BRAZIL',
-              unitSchedule: cls.unitSchedule,
-              speakingSchedule: cls.speakingSchedule,
+              id: selectedFee.class.id,
+              code: selectedFee.class.code,
+              name: selectedFee.class.name,
+              level: selectedFee.class.level,
+              book: selectedFee.class.book,
+              modality: selectedFee.class.modality,
+              classroom: selectedFee.class.classroom?.name || 'Aula BRAZIL',
+              unitSchedule: selectedFee.class.unitSchedule,
+              speakingSchedule: selectedFee.class.speakingSchedule,
             },
             payments: selectedFee.payments.map((p) => ({
               id: p.id,
@@ -975,7 +981,9 @@ export async function getCourseFinanceBreakdownAction(
           hasDisability: student.hasDisability,
           notes: student.notes,
           monthlyFee: monthlyFeeNum,
-          nextPaymentDate: student.nextPaymentDate ? student.nextPaymentDate.toISOString() : null,
+          nextPaymentDate: nextPaymentDate?.toISOString() ?? null,
+          outstandingBalance,
+          unpaidFeesCount: unpaidFees.length,
           contextualStatus,
           statusLabel,
           feeStatus: selectedFee ? selectedFee.status : 'UNISSUED',
@@ -1145,6 +1153,7 @@ export async function getMonthlyCollectionHistoryAction(
   month?: number
 ): Promise<MonthlyCollectionHistoryResponse> {
   try {
+    await requireAuth();
     const now = new Date();
     const targetYear = typeof year === 'number' && year >= 2020 && year <= 2100 ? year : now.getFullYear();
     const targetMonth = typeof month === 'number' && month >= 1 && month <= 12 ? month : now.getMonth() + 1;
@@ -1342,6 +1351,7 @@ export async function getAnnualCashflowSummaryAction(
   year?: number
 ): Promise<AnnualCashflowSummaryResponse> {
   try {
+    await requireAuth();
     const targetYear = typeof year === 'number' && year >= 2020 && year <= 2100 ? year : new Date().getFullYear();
 
     const startOfYear = new Date(targetYear, 0, 1, 0, 0, 0, 0);

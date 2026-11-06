@@ -10,6 +10,7 @@ import {
   ClassStatus 
 } from '@prisma/client';
 import { checkClassroomConflictForPrivateClass } from '@/lib/classroom-conflicts';
+import { requireAuth } from '@/lib/require-auth';
 
 export type EnrolledStudentSummary = {
   id: string;
@@ -94,6 +95,7 @@ export type WeeklyScheduleData = {
  */
 export async function getWeeklyScheduleAction(): Promise<WeeklyScheduleData> {
   try {
+    await requireAuth();
     const [classes, privateClasses] = await Promise.all([
       prisma.class.findMany({
         include: {
@@ -228,6 +230,7 @@ export async function createPrivateClassAction(data: {
   chargeAmount: number;
 }): Promise<{ success: boolean; message: string; id?: string }> {
   try {
+    await requireAuth();
     if (!data.studentName?.trim() || !data.teacherId || !data.date || !data.startTime || !data.endTime) {
       return { success: false, message: 'Todos los campos obligatorios deben completarse.' };
     }
@@ -316,6 +319,7 @@ export async function updatePrivateClassStatusAction(
   status: PrivateClassStatus
 ): Promise<{ success: boolean; message: string }> {
   try {
+    await requireAuth();
     if (!id || !status) {
       return { success: false, message: 'ID y nuevo estado son obligatorios.' };
     }

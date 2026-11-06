@@ -27,7 +27,8 @@ import {
   StudentFinancialHistory, 
   SerializedTuitionFee 
 } from '@/actions/finance';
-import { formatCurrency, formatDate, getDaysDiffFromNow, getMonthName } from '@/lib/utils';
+import { formatCurrency, formatDate, formatTuitionDate, getDaysDiffFromNow, getMonthName } from '@/lib/utils';
+import { TuitionPaymentBlocked } from './TuitionPaymentBlocked';
 import { buildWhatsAppUrl } from '@/lib/ecuador-validators';
 import { PaymentModal } from './PaymentModal';
 import { PaymentReceiptModal } from './PaymentReceiptModal';
@@ -384,7 +385,7 @@ export function StudentFinancialHistoryModal({
                                   {/* Vencimiento */}
                                   <td className="px-4 py-3.5">
                                     <div className="text-slate-800 font-medium">
-                                      {formatDate(fee.dueDate)}
+                                      {formatTuitionDate(fee.dueDate)}
                                     </div>
                                     {isOverdue && (
                                       <span className="text-[10px] font-bold text-rose-600">
@@ -443,7 +444,9 @@ export function StudentFinancialHistoryModal({
 
                                   {/* Acción Cobrar o Ver Recibo */}
                                   <td className="px-4 py-3.5 text-right">
-                                    {isPaid ? (
+                                    {fee.blockedByPeriod ? (
+                                      <TuitionPaymentBlocked period={fee.blockedByPeriod} />
+                                    ) : isPaid ? (
                                       <button
                                         onClick={() => setSelectedReceiptId(fee.id)}
                                         className="inline-flex items-center gap-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 px-2.5 py-1 text-xs font-bold transition-all shadow-xs active:scale-[0.98]"

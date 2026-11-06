@@ -15,7 +15,7 @@ import {
   Clock
 } from 'lucide-react';
 import { SerializedStudent, SerializedClass } from '@/actions/academic';
-import { formatCurrency, formatDate } from '@/lib/utils';
+import { formatCurrency, formatTuitionDate } from '@/lib/utils';
 import { buildWhatsAppUrl } from '@/lib/ecuador-validators';
 import { CreateStudentModal } from './CreateStudentModal';
 import { EditStudentModal } from './EditStudentModal';
@@ -223,7 +223,7 @@ export function StudentsView({ initialStudents, classes }: StudentsViewProps) {
                           <div className="space-y-0.5">
                             <span className="inline-flex items-center gap-1 text-slate-900 font-bold text-xs">
                               <Calendar className="h-3 w-3 text-indigo-600" />
-                              {formatDate(student.nextPaymentDate)}
+                              {formatTuitionDate(student.nextPaymentDate)}
                             </span>
                             <div className="text-[10px] text-slate-400 font-medium">
                               Ciclo mensual regular

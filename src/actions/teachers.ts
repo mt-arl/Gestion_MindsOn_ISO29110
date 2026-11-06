@@ -8,6 +8,7 @@ import {
   CourseLevel, 
   PrivateClassStatus 
 } from '@prisma/client';
+import { requireAuth } from '@/lib/require-auth';
 
 export type SerializedTeacherDetailed = {
   id: string;
@@ -56,6 +57,7 @@ export type SerializedTeacherDetailed = {
  */
 export async function getTeachersList(search?: string): Promise<SerializedTeacherDetailed[]> {
   try {
+    await requireAuth();
     const whereCondition: Record<string, unknown> = {};
 
     if (search?.trim()) {
@@ -153,6 +155,7 @@ export async function createTeacherAction(data: {
   phone: string;
 }): Promise<{ success: boolean; message: string; teacherId?: string }> {
   try {
+    await requireAuth();
     const ciClean = data.ci?.trim();
     const emailClean = data.email?.trim().toLowerCase();
 
@@ -211,6 +214,7 @@ export async function updateTeacherAction(
   }
 ): Promise<{ success: boolean; message: string }> {
   try {
+    await requireAuth();
     if (!teacherId) {
       return { success: false, message: 'ID de docente no proporcionado.' };
     }
@@ -277,6 +281,7 @@ export async function deleteTeacherAction(
   teacherId: string
 ): Promise<{ success: boolean; message: string }> {
   try {
+    await requireAuth();
     if (!teacherId) {
       return { success: false, message: 'ID de docente no proporcionado.' };
     }

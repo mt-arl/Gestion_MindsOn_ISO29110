@@ -14,6 +14,9 @@ import { getBookForLevel } from '@/lib/utils';
 import { validateEcuadorianId, validateEcuadorianPhone } from '@/lib/ecuador-validators';
 import { checkClassroomConflictForClass } from '@/lib/classroom-conflicts';
 import { ensureDefaultBooksAndLinkClasses } from '@/actions/books';
+import { requireAuth } from '@/lib/require-auth';
+import { issueMonthlyTuitions, syncMonthlyTuitions, updateStudentTuitionDeadlines, withTuitionTransaction } from '@/lib/tuition-billing';
+import { parseTuitionDateInput, TUITION_TIME_ZONE, tuitionDay, tuitionPeriod, upcomingTuitionDate } from '@/lib/tuition-dates';
 
 export type SerializedTeacher = {
   id: string;
@@ -101,6 +104,7 @@ export type SerializedStudent = {
  */
 export async function getTeachersList(): Promise<SerializedTeacher[]> {
   try {
+    await requireAuth();
     const teachers = await prisma.teacher.findMany({
       orderBy: { lastName: 'asc' },
     });
@@ -123,6 +127,7 @@ export async function getTeachersList(): Promise<SerializedTeacher[]> {
  */
 export async function getClassesList(): Promise<SerializedClass[]> {
   try {
+    await requireAuth();
     await ensureDefaultBooksAndLinkClasses();
 
     const classes = await prisma.class.findMany({
@@ -205,6 +210,7 @@ export async function createClassAction(data: {
   speakingTeacherId?: string | null;
 }): Promise<{ success: boolean; message: string; classId?: string }> {
   try {
+    await requireAuth();
     const normalizedCode = data.code?.trim().toUpperCase();
     const isPresencial = data.modality === ClassModality.PRESENCIAL;
 
@@ -333,6 +339,7 @@ export async function updateClassAction(
   }
 ): Promise<{ success: boolean; message: string }> {
   try {
+    await requireAuth();
     if (!classId) {
       return { success: false, message: 'ID de clase no proporcionado.' };
     }
@@ -458,17 +465,22 @@ export async function pauseClassAction(
   reason?: string
 ): Promise<{ success: boolean; message: string }> {
   try {
+    await requireAuth();
     if (!classId) {
       return { success: false, message: 'ID de clase no proporcionado.' };
     }
 
-    const updated = await prisma.class.update({
-      where: { id: classId },
-      data: {
-        status: ClassStatus.IN_RECESS,
-        recessStartedAt: new Date(),
-        recessReason: reason?.trim() || null,
-      },
+    const updated = await withTuitionTransaction(async (tx) => {
+      const now = new Date();
+      await issueMonthlyTuitions(tx, now, { currentClassId: classId });
+      return tx.class.update({
+        where: { id: classId, status: ClassStatus.ACTIVE },
+        data: {
+          status: ClassStatus.IN_RECESS,
+          recessStartedAt: now,
+          recessReason: reason?.trim() || null,
+        },
+      });
     });
 
     revalidatePath('/classes');
@@ -487,86 +499,33 @@ export async function pauseClassAction(
 }
 
 /**
- * 5. Reactiva una clase en receso y recalcula el próximo cobro (+1 mes) para sus alumnos
+ * 5. Reactiva un curso y retoma el calendario individual de sus alumnos.
  */
 export async function resumeClassAction(
   classId: string,
-  resumeDate?: string | Date
 ): Promise<{ success: boolean; message: string; updatedStudentsCount: number }> {
   try {
+    await requireAuth();
     if (!classId) {
       return { success: false, message: 'ID de clase no proporcionado.', updatedStudentsCount: 0 };
     }
 
-    const effectiveResumeDate = resumeDate ? new Date(resumeDate) : new Date();
-
-    // Fecha del próximo pago: 1 mes a partir de la fecha de reactivación
-    const nextPaymentDate = new Date(effectiveResumeDate);
-    nextPaymentDate.setMonth(nextPaymentDate.getMonth() + 1);
-
-    const targetMonth = nextPaymentDate.getMonth() + 1;
-    const targetYear = nextPaymentDate.getFullYear();
-
-    const result = await prisma.$transaction(async (tx) => {
-      // 1. Reactivar la clase
+    const result = await withTuitionTransaction(async (tx) => {
+      const now = new Date();
+      const scope = { currentClassId: classId, status: StudentStatus.ACTIVE };
       const updatedClass = await tx.class.update({
-        where: { id: classId },
-        data: {
-          status: ClassStatus.ACTIVE,
-          recessStartedAt: null,
-          recessReason: null,
-        },
+        where: { id: classId, status: ClassStatus.IN_RECESS },
+        data: { status: ClassStatus.ACTIVE, recessStartedAt: null, recessReason: null },
       });
 
-      // 2. Buscar estudiantes activos en esta clase
-      const activeStudents = await tx.student.findMany({
-        where: {
-          currentClassId: classId,
-          status: StudentStatus.ACTIVE,
-        },
+      // Omitir los periodos que transcurrieron en receso.
+      await tx.student.updateMany({
+        where: { ...scope, tuitionSyncedThrough: { not: null } },
+        data: { tuitionSyncedThrough: tuitionPeriod(tuitionDay(now), -1) },
       });
+      await issueMonthlyTuitions(tx, now, scope, { activeSince: now });
 
-      // 3. Actualizar fecha de cobro y generar cuota PENDING para cada estudiante
-      for (const student of activeStudents) {
-        await tx.student.update({
-          where: { id: student.id },
-          data: {
-            nextPaymentDate: nextPaymentDate,
-          },
-        });
-
-        // Verificar si ya existe cuota para ese periodo
-        const existingFee = await tx.tuitionFee.findUnique({
-          where: {
-            student_class_period_unique: {
-              studentId: student.id,
-              classId: classId,
-              month: targetMonth,
-              year: targetYear,
-            },
-          },
-        });
-
-        if (!existingFee) {
-          await tx.tuitionFee.create({
-            data: {
-              studentId: student.id,
-              classId: classId,
-              month: targetMonth,
-              year: targetYear,
-              dueDate: nextPaymentDate,
-              amount: student.monthlyFee,
-              status: TuitionFeeStatus.PENDING,
-            },
-          });
-        }
-      }
-
-      return {
-        className: updatedClass.name,
-        classCode: updatedClass.code,
-        studentsCount: activeStudents.length,
-      };
+      return { className: updatedClass.name, studentsCount: await tx.student.count({ where: scope }) };
     });
 
     revalidatePath('/classes');
@@ -576,7 +535,7 @@ export async function resumeClassAction(
 
     return {
       success: true,
-      message: `Curso "${result.className}" reactivado exitosamente. Próximo cobro fijado para el ${nextPaymentDate.toLocaleDateString('es-ES')} (${result.studentsCount} alumnos actualizados).`,
+      message: `Curso "${result.className}" reactivado exitosamente. Se retomó el calendario individual de ${result.studentsCount} alumnos.`,
       updatedStudentsCount: result.studentsCount,
     };
   } catch (error) {
@@ -593,6 +552,8 @@ export async function getStudentsList(
   filterClassId?: string
 ): Promise<SerializedStudent[]> {
   try {
+    await requireAuth();
+    await syncMonthlyTuitions();
     const whereCondition: Record<string, unknown> = {};
 
     if (filterClassId && filterClassId !== 'ALL') {
@@ -619,12 +580,13 @@ export async function getStudentsList(
           },
         },
         tuitionFees: {
-          select: { status: true },
+          select: { status: true, month: true, year: true },
         },
       },
       orderBy: { lastName: 'asc' },
     });
 
+    const now = new Date();
     return students.map((s) => {
       const pendingOrOverdueCount = s.tuitionFees.filter(
         (f) => f.status === TuitionFeeStatus.PENDING || f.status === TuitionFeeStatus.OVERDUE
@@ -640,7 +602,13 @@ export async function getStudentsList(
         guardianPhone1: s.guardianPhone1,
         guardianPhone2: s.guardianPhone2,
         enrollmentDate: s.enrollmentDate.toISOString(),
-        nextPaymentDate: s.nextPaymentDate ? s.nextPaymentDate.toISOString() : null,
+        nextPaymentDate: s.status === StudentStatus.ACTIVE && s.currentClass?.status === ClassStatus.ACTIVE
+          ? upcomingTuitionDate(
+              s.enrollmentDate,
+              now,
+              s.tuitionFees,
+            ).toISOString()
+          : null,
         age: s.age,
         gender: s.gender,
         address: s.address,
@@ -705,9 +673,9 @@ export async function createStudentAction(data: {
   invoiceAddress?: string | null;
   invoicePhone?: string | null;
   currentClassId?: string | null;
-  customFirstPaymentDate?: string;
 }): Promise<{ success: boolean; message: string; studentId?: string }> {
   try {
+    await requireAuth();
     const ciClean = data.ci?.trim() ? data.ci.trim() : null;
     const emailClean = data.email?.trim().toLowerCase();
     const firstNameClean = data.firstName?.trim();
@@ -766,79 +734,34 @@ export async function createStudentAction(data: {
     }
 
     const enrollmentDate = new Date();
-    let nextPaymentDate: Date;
-    if (data.customFirstPaymentDate && data.customFirstPaymentDate.trim()) {
-      const parts = data.customFirstPaymentDate.trim().split('-');
-      if (parts.length === 3) {
-        const y = parseInt(parts[0], 10);
-        const m = parseInt(parts[1], 10);
-        const d = parseInt(parts[2], 10);
-        nextPaymentDate = new Date(y, m - 1, d, 12, 0, 0);
-      } else {
-        nextPaymentDate = new Date(enrollmentDate);
-        nextPaymentDate.setMonth(nextPaymentDate.getMonth() + 1);
-      }
-    } else {
-      nextPaymentDate = new Date(enrollmentDate);
-      nextPaymentDate.setMonth(nextPaymentDate.getMonth() + 1);
-    }
-
-    // Transacción para crear estudiante y generar cuota si aplica
-    const student = await prisma.$transaction(async (tx) => {
-      const newStudent = await tx.student.create({
-        data: {
-          ci: ciClean,
-          firstName: firstNameClean,
-          lastName: lastNameClean,
-          email: emailClean,
-          phone: phoneClean,
-          guardianPhone1: data.guardianPhone1?.trim() || null,
-          guardianPhone2: data.guardianPhone2?.trim() || null,
-          enrollmentDate: enrollmentDate,
-          nextPaymentDate: nextPaymentDate,
-          age: Number(data.age) || 18,
-          gender: data.gender || 'No especificado',
-          address: data.address?.trim() || null,
-          status: StudentStatus.ACTIVE,
-          monthlyFee: data.monthlyFee,
-          hasDisability: Boolean(data.hasDisability),
-          disabilityDescription: data.hasDisability ? (data.disabilityDescription?.trim() || null) : null,
-          notes: data.notes?.trim() || null,
-          invoiceIdType: data.invoiceIdType || 'CEDULA',
-          invoiceIdNumber: data.invoiceIdNumber?.trim() || null,
-          invoiceName: data.invoiceName?.trim() || null,
-          invoiceEmail: data.invoiceEmail?.trim() || null,
-          invoiceAddress: data.invoiceAddress?.trim() || null,
-          invoicePhone: data.invoicePhone?.trim() || null,
-          currentClassId: data.currentClassId?.trim() || null,
-        },
-      });
-
-      // Si tiene clase asignada y no está en receso, generar cuota PENDING con vencimiento en nextPaymentDate
-      if (data.currentClassId?.trim()) {
-        const assignedClass = await tx.class.findUnique({
-          where: { id: data.currentClassId.trim() },
-        });
-
-        if (assignedClass && assignedClass.status !== ClassStatus.IN_RECESS) {
-          const targetMonth = nextPaymentDate.getMonth() + 1;
-          const targetYear = nextPaymentDate.getFullYear();
-
-          await tx.tuitionFee.create({
-            data: {
-              studentId: newStudent.id,
-              classId: assignedClass.id,
-              month: targetMonth,
-              year: targetYear,
-              dueDate: nextPaymentDate,
-              amount: newStudent.monthlyFee,
-              status: TuitionFeeStatus.PENDING,
-            },
-          });
-        }
-      }
-
-      return newStudent;
+    const student = await prisma.student.create({
+      data: {
+        ci: ciClean,
+        firstName: firstNameClean,
+        lastName: lastNameClean,
+        email: emailClean,
+        phone: phoneClean,
+        guardianPhone1: data.guardianPhone1?.trim() || null,
+        guardianPhone2: data.guardianPhone2?.trim() || null,
+        enrollmentDate: enrollmentDate,
+        tuitionSyncedThrough: tuitionPeriod(tuitionDay(enrollmentDate)),
+        age: Number(data.age) || 18,
+        gender: data.gender || 'No especificado',
+        address: data.address?.trim() || null,
+        status: StudentStatus.ACTIVE,
+        monthlyFee: data.monthlyFee,
+        hasDisability: Boolean(data.hasDisability),
+        disabilityDescription: data.hasDisability ? (data.disabilityDescription?.trim() || null) : null,
+        notes: data.notes?.trim() || null,
+        invoiceIdType: data.invoiceIdType || 'CEDULA',
+        invoiceIdNumber: data.invoiceIdNumber?.trim() || null,
+        invoiceName: data.invoiceName?.trim() || null,
+        invoiceEmail: data.invoiceEmail?.trim() || null,
+        invoiceAddress: data.invoiceAddress?.trim() || null,
+        invoicePhone: data.invoicePhone?.trim() || null,
+        currentClassId: data.currentClassId?.trim() || null,
+      },
+      include: { currentClass: { select: { status: true } } },
     });
 
     revalidatePath('/students');
@@ -846,9 +769,14 @@ export async function createStudentAction(data: {
     revalidatePath('/schedule');
     revalidatePath('/');
 
+    const nextPaymentDate = upcomingTuitionDate(enrollmentDate, enrollmentDate);
+    const dateNotice = student.currentClass?.status === ClassStatus.ACTIVE
+      ? ` Próximo cobro: ${nextPaymentDate.toLocaleDateString('es-EC', { timeZone: TUITION_TIME_ZONE })}.`
+      : '';
+
     return {
       success: true,
-      message: `Estudiante ${student.firstName} ${student.lastName} registrado exitosamente con mensualidad de $${data.monthlyFee.toFixed(2)} USD. Próximo cobro: ${nextPaymentDate.toLocaleDateString('es-ES')}.`,
+      message: `Estudiante ${student.firstName} ${student.lastName} registrado exitosamente con mensualidad de $${data.monthlyFee.toFixed(2)} USD.${dateNotice}`,
       studentId: student.id,
     };
   } catch (error) {
@@ -874,6 +802,7 @@ export async function updateStudentAction(
     gender: string;
     address?: string | null;
     status: StudentStatus;
+    enrollmentDate?: string;
     monthlyFee: number;
     hasDisability?: boolean;
     disabilityDescription?: string | null;
@@ -885,12 +814,21 @@ export async function updateStudentAction(
     invoiceAddress?: string | null;
     invoicePhone?: string | null;
     currentClassId?: string | null;
-    customNextPaymentDate?: string | null;
   }
 ): Promise<{ success: boolean; message: string }> {
   try {
+    await requireAuth();
     if (!studentId) {
       return { success: false, message: 'ID de estudiante no proporcionado.' };
+    }
+
+    let enrollmentDate: Date | undefined;
+    if (data.enrollmentDate !== undefined) {
+      const parsed = typeof data.enrollmentDate === 'string' ? parseTuitionDateInput(data.enrollmentDate) : null;
+      if (!parsed || parsed > new Date()) {
+        return { success: false, message: 'Ingresa una fecha de matrícula válida hasta el día de hoy.' };
+      }
+      enrollmentDate = parsed;
     }
 
     const ciClean = data.ci?.trim() ? data.ci.trim() : null;
@@ -961,20 +899,26 @@ export async function updateStudentAction(
       return { success: false, message: `El correo "${emailClean}" ya está en uso por otro estudiante.` };
     }
 
-    let parsedCustomDate: Date | null = null;
-    if (data.customNextPaymentDate && data.customNextPaymentDate.trim()) {
-      const parts = data.customNextPaymentDate.trim().split('-');
-      if (parts.length === 3) {
-        const y = parseInt(parts[0], 10);
-        const m = parseInt(parts[1], 10);
-        const d = parseInt(parts[2], 10);
-        parsedCustomDate = new Date(y, m - 1, d, 12, 0, 0);
-      } else {
-        parsedCustomDate = new Date(data.customNextPaymentDate);
-      }
-    }
+    const updatedStudent = await withTuitionTransaction(async (tx) => {
+      const now = new Date();
+      const scope = { id: studentId };
+      const current = await tx.student.findUniqueOrThrow({ where: scope });
+      const currentClassId = data.currentClassId?.trim() || null;
+      const assignmentChanged = current.currentClassId !== currentClassId || current.status !== data.status;
+      const oldEnrollmentDay = tuitionDay(current.enrollmentDate);
+      const correctedDate = enrollmentDate && tuitionDay(enrollmentDate).getTime() !== oldEnrollmentDay.getTime()
+        ? enrollmentDate : undefined;
+      const currentPeriod = tuitionPeriod(tuitionDay(now));
+      const newlyEligibleThisMonth = correctedDate &&
+        tuitionPeriod(oldEnrollmentDay, 1) > currentPeriod &&
+        tuitionPeriod(tuitionDay(correctedDate), 1) <= currentPeriod;
 
-    const updatedStudent = await prisma.$transaction(async (tx) => {
+      if (correctedDate) {
+        await issueMonthlyTuitions(tx, now, scope, { throughPreviousMonth: true });
+      } else if (assignmentChanged || !current.monthlyFee.equals(data.monthlyFee)) {
+        await issueMonthlyTuitions(tx, now, scope);
+      }
+
       const student = await tx.student.update({
         where: { id: studentId },
         data: {
@@ -989,6 +933,7 @@ export async function updateStudentAction(
           gender: data.gender || 'No especificado',
           address: data.address?.trim() || null,
           status: data.status,
+          enrollmentDate: correctedDate,
           monthlyFee: data.monthlyFee,
           hasDisability: Boolean(data.hasDisability),
           disabilityDescription: data.hasDisability ? (data.disabilityDescription?.trim() || null) : null,
@@ -999,33 +944,22 @@ export async function updateStudentAction(
           invoiceEmail: data.invoiceEmail?.trim() || null,
           invoiceAddress: data.invoiceAddress?.trim() || null,
           invoicePhone: data.invoicePhone?.trim() || null,
-          currentClassId: data.currentClassId?.trim() || null,
-          ...(parsedCustomDate ? { nextPaymentDate: parsedCustomDate } : {}),
+          currentClassId,
         },
       });
 
-      // 3. Sincronización Crítica de la Cuota Pendiente (TuitionFee)
-      if (parsedCustomDate) {
-        const pendingFee = await tx.tuitionFee.findFirst({
-          where: {
-            studentId: studentId,
-            status: { in: [TuitionFeeStatus.PENDING, TuitionFeeStatus.OVERDUE] },
-          },
-          orderBy: { dueDate: 'asc' },
-        });
+      if (correctedDate) {
+        await updateStudentTuitionDeadlines(tx, studentId, correctedDate, now);
+      }
 
-        if (pendingFee) {
-          const isNowOverdue = parsedCustomDate < new Date();
-          await tx.tuitionFee.update({
-            where: { id: pendingFee.id },
-            data: {
-              dueDate: parsedCustomDate,
-              month: parsedCustomDate.getMonth() + 1,
-              year: parsedCustomDate.getFullYear(),
-              status: isNowOverdue ? TuitionFeeStatus.OVERDUE : TuitionFeeStatus.PENDING,
-            },
-          });
-        }
+      if ((assignmentChanged || newlyEligibleThisMonth) && student.status === StudentStatus.ACTIVE && currentClassId) {
+        await tx.student.updateMany({
+          where: { ...scope, tuitionSyncedThrough: { not: null } },
+          data: { tuitionSyncedThrough: tuitionPeriod(currentPeriod, -1) },
+        });
+      }
+      if (correctedDate || assignmentChanged) {
+        await issueMonthlyTuitions(tx, now, scope, { activeSince: assignmentChanged ? now : undefined });
       }
 
       return student;
@@ -1036,129 +970,12 @@ export async function updateStudentAction(
     revalidatePath('/schedule');
     revalidatePath('/');
 
-    const dateNotice = parsedCustomDate
-      ? ` Próximo pago actualizado al ${parsedCustomDate.toLocaleDateString('es-ES')}.`
-      : '';
-
     return {
       success: true,
-      message: `Estudiante ${updatedStudent.firstName} ${updatedStudent.lastName} actualizado exitosamente.${dateNotice}`,
+      message: `Estudiante ${updatedStudent.firstName} ${updatedStudent.lastName} actualizado exitosamente.`,
     };
   } catch (error) {
     console.error('Error al actualizar estudiante:', error);
     return { success: false, message: 'Error interno al actualizar los datos del estudiante.' };
-  }
-}
-
-/**
- * 9. Genera masivamente las cuotas del mes para todos los estudiantes activos (excluye clases en receso)
- */
-export async function generateMonthlyTuitionsAction(
-  month: number,
-  year: number,
-  dueDay: number = 10
-): Promise<{
-  success: boolean;
-  message: string;
-  createdCount: number;
-  skippedCount: number;
-}> {
-  try {
-    if (month < 1 || month > 12) {
-      return { success: false, message: 'Mes inválido (debe estar entre 1 y 12).', createdCount: 0, skippedCount: 0 };
-    }
-
-    if (year < 2020 || year > 2100) {
-      return { success: false, message: 'Año inválido.', createdCount: 0, skippedCount: 0 };
-    }
-
-    // Obtener todos los estudiantes activos con clase asignada y que NO esté en receso
-    const activeStudents = await prisma.student.findMany({
-      where: {
-        status: StudentStatus.ACTIVE,
-        currentClassId: { not: null },
-        currentClass: {
-          status: { not: ClassStatus.IN_RECESS },
-        },
-      },
-      include: {
-        currentClass: true,
-      },
-    });
-
-    if (activeStudents.length === 0) {
-      return {
-        success: true,
-        message: 'No hay estudiantes activos en clases operativas (no en receso) para generar mensualidades.',
-        createdCount: 0,
-        skippedCount: 0,
-      };
-    }
-
-    // Calcular fecha límite para el mes/año indicado
-    const validDueDay = Math.min(Math.max(1, dueDay), 28);
-    const dueDate = new Date(year, month - 1, validDueDay, 23, 59, 59);
-    const now = new Date();
-    const initialStatus = dueDate < now ? TuitionFeeStatus.OVERDUE : TuitionFeeStatus.PENDING;
-
-    let createdCount = 0;
-    let skippedCount = 0;
-
-    for (const student of activeStudents) {
-      if (!student.currentClassId || !student.currentClass) continue;
-
-      // Comprobar si ya existe la cuota del periodo
-      const existingFee = await prisma.tuitionFee.findUnique({
-        where: {
-          student_class_period_unique: {
-            studentId: student.id,
-            classId: student.currentClassId,
-            month: month,
-            year: year,
-          },
-        },
-      });
-
-      if (existingFee) {
-        skippedCount++;
-      } else {
-        await prisma.tuitionFee.create({
-          data: {
-            studentId: student.id,
-            classId: student.currentClassId,
-            month: month,
-            year: year,
-            dueDate: dueDate,
-            amount: student.monthlyFee,
-            status: initialStatus,
-          },
-        });
-        createdCount++;
-      }
-    }
-
-    revalidatePath('/');
-    revalidatePath('/students');
-
-    const months = [
-      'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-      'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
-    ];
-    const monthName = months[month - 1];
-
-    return {
-      success: true,
-      message: `Proceso completado para ${monthName} ${year}: Se crearon ${createdCount} cuotas nuevas (${skippedCount} ya existían o fueron omitidas).`,
-      createdCount,
-      skippedCount,
-    };
-  } catch (error) {
-    console.error('Error al generar cuotas mensuales:', error);
-    return {
-      success: false,
-      message: 'Ocurrió un error inesperado durante la generación masiva de cuotas.',
-      createdCount: 0,
-      skippedCount: 0,
-    };
   }
 }

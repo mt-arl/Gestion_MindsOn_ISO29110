@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import prisma from '@/lib/prisma';
 import { ClassStatus } from '@prisma/client';
+import { requireAuth } from '@/lib/require-auth';
 
 export type SerializedClassroom = {
   id: string;
@@ -21,6 +22,7 @@ export type SerializedClassroom = {
  */
 export async function getClassroomsAction(includeInactive: boolean = false): Promise<SerializedClassroom[]> {
   try {
+    await requireAuth();
     const classrooms = await prisma.classroom.findMany({
       where: includeInactive ? undefined : { isActive: true },
       include: {
@@ -62,6 +64,7 @@ export async function createClassroomAction(data: {
   isVirtual?: boolean;
 }): Promise<{ success: boolean; message: string; classroom?: SerializedClassroom }> {
   try {
+    await requireAuth();
     const nameClean = data.name?.trim();
     if (!nameClean) {
       return { success: false, message: 'El nombre del aula es obligatorio.' };
@@ -123,6 +126,7 @@ export async function updateClassroomAction(
   }
 ): Promise<{ success: boolean; message: string }> {
   try {
+    await requireAuth();
     if (!id) {
       return { success: false, message: 'ID del aula no proporcionado.' };
     }
@@ -170,6 +174,7 @@ export async function updateClassroomAction(
  */
 export async function deleteClassroomAction(id: string): Promise<{ success: boolean; message: string }> {
   try {
+    await requireAuth();
     if (!id) {
       return { success: false, message: 'ID del aula no proporcionado.' };
     }

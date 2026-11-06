@@ -31,16 +31,18 @@ import {
   AnnualCashflowSummaryResponse
 } from '@/actions/finance';
 import { MonthlyFinancialBalanceResponse } from '@/actions/expenses';
-import { formatCurrency, formatDate, getDaysDiffFromNow, getMonthName } from '@/lib/utils';
+import { formatCurrency, formatTuitionDate, getDaysDiffFromNow, getMonthName } from '@/lib/utils';
 import { buildWhatsAppUrl } from '@/lib/ecuador-validators';
 import { PaymentModal } from './PaymentModal';
 import { PaymentReceiptModal } from './PaymentReceiptModal';
 import { CourseFinanceBreakdown } from './CourseFinanceBreakdown';
 import { MonthlyCollectionHistorySection } from './MonthlyCollectionHistorySection';
 import { FinancialBalanceSection } from './FinancialBalanceSection';
+import { TuitionPaymentBlocked } from './TuitionPaymentBlocked';
 
 interface TuitionControlSectionProps {
   initialFees: SerializedTuitionFee[];
+  currentPeriod: { month: number; year: number };
   courseBreakdownData: CourseFinanceBreakdownResponse;
   initialMonthlyHistoryData?: MonthlyCollectionHistoryResponse;
   initialAnnualCashflowData?: AnnualCashflowSummaryResponse;
@@ -50,8 +52,13 @@ interface TuitionControlSectionProps {
 type MainDashboardView = 'GENERAL' | 'BY_COURSE' | 'HISTORY' | 'BALANCE';
 type TabFilter = 'ALL' | 'OVERDUE' | 'PENDING' | 'PAID';
 
+function periodKey(year: number, month: number) {
+  return year * 100 + month;
+}
+
 export function TuitionControlSection({ 
   initialFees, 
+  currentPeriod: { month: currentMonth, year: currentYear },
   courseBreakdownData,
   initialMonthlyHistoryData,
   initialAnnualCashflowData,
@@ -60,22 +67,79 @@ export function TuitionControlSection({
   const [mainView, setMainView] = useState<MainDashboardView>('GENERAL');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedTab, setSelectedTab] = useState<TabFilter>('ALL');
+  const currentPeriodKey = periodKey(currentYear, currentMonth);
+  const [selectedPeriod, setSelectedPeriod] = useState<number | 'ALL'>(currentPeriodKey);
   const [selectedFeeForPayment, setSelectedFeeForPayment] = useState<SerializedTuitionFee | null>(null);
   const [selectedReceiptId, setSelectedReceiptId] = useState<string | null>(null);
 
-  // Contadores por categoría para los badges de las pestañas
+  const periods = useMemo(() => {
+    const byPeriod = new Map([
+      [currentPeriodKey, { month: currentMonth, year: currentYear, fees: [] as SerializedTuitionFee[] }],
+    ]);
+
+    for (const fee of initialFees) {
+      const key = periodKey(fee.year, fee.month);
+      const period = byPeriod.get(key);
+      if (period) {
+        period.fees.push(fee);
+      } else {
+        byPeriod.set(key, { month: fee.month, year: fee.year, fees: [fee] });
+      }
+    }
+    return byPeriod;
+  }, [currentMonth, currentYear, currentPeriodKey, initialFees]);
+
+  const activePeriod = selectedPeriod === 'ALL' || periods.has(selectedPeriod)
+    ? selectedPeriod
+    : currentPeriodKey;
+  const monthlyRecord = activePeriod === 'ALL' ? undefined : periods.get(activePeriod);
+  const periodFees = monthlyRecord?.fees ?? initialFees;
+  const periodTitle = monthlyRecord
+    ? `${getMonthName(monthlyRecord.month)} ${monthlyRecord.year}`
+    : 'Todos los meses';
+  const periodOptions = [
+    { key: 'ALL' as const, label: 'Todos los meses', count: initialFees.length, settled: false },
+    ...Array.from(periods.entries())
+      .sort(([a], [b]) => Number(b === currentPeriodKey) - Number(a === currentPeriodKey) || b - a)
+      .map(([key, { month, year, fees }]) => ({
+        key,
+        label: `${getMonthName(month)} ${year}`,
+        count: fees.length,
+        settled: fees.length > 0 && fees.every((fee) => fee.status === 'PAID'),
+      })),
+  ];
+
+  // El resumen siempre se calcula sobre el registro completo del periodo.
   const counts = useMemo(() => {
-    return {
-      all: initialFees.length,
-      overdue: initialFees.filter((f) => f.status === 'OVERDUE').length,
-      pending: initialFees.filter((f) => f.status === 'PENDING').length,
-      paid: initialFees.filter((f) => f.status === 'PAID').length,
-    };
-  }, [initialFees]);
+    const summary = { all: periodFees.length, overdue: 0, pending: 0, paid: 0, issuedAmount: 0, outstandingAmount: 0 };
+    for (const fee of periodFees) {
+      summary.issuedAmount += fee.amount;
+      if (fee.status === 'PAID') {
+        summary.paid++;
+      } else {
+        summary.outstandingAmount += fee.amount;
+        if (fee.status === 'OVERDUE') {
+          summary.overdue++;
+        } else {
+          summary.pending++;
+        }
+      }
+    }
+    return summary;
+  }, [periodFees]);
+
+  const settled = counts.all > 0 && counts.paid === counts.all;
+
+  const openPeriod = (key: number | 'ALL') => {
+    if (key === activePeriod) return;
+    setSelectedPeriod(key);
+    setSelectedTab('ALL');
+    setSearchTerm('');
+  };
 
   // Filtrado reactivo por pestaña y término de búsqueda
   const filteredFees = useMemo(() => {
-    return initialFees.filter((fee) => {
+    return periodFees.filter((fee) => {
       // Filtro por pestaña
       if (selectedTab !== 'ALL' && fee.status !== selectedTab) {
         return false;
@@ -98,7 +162,7 @@ export function TuitionControlSection({
         className.includes(query)
       );
     });
-  }, [initialFees, selectedTab, searchTerm]);
+  }, [periodFees, selectedTab, searchTerm]);
 
   return (
     <div className="space-y-6">
@@ -191,11 +255,72 @@ export function TuitionControlSection({
         <CourseFinanceBreakdown initialData={courseBreakdownData} />
       ) : (
         <div className="space-y-5">
+          <div className="min-w-0 rounded-2xl border border-slate-200/80 bg-white px-4 py-3">
+            <p id="tuition-period-label" className="mb-2 flex items-center gap-1.5 text-xs font-bold text-slate-600">
+              <Calendar className="h-4 w-4 text-indigo-600" aria-hidden="true" />
+              Historial mensual de cuotas
+            </p>
+            <div role="group" aria-labelledby="tuition-period-label" className="flex items-center gap-2 overflow-x-auto pb-1">
+              {periodOptions.map(({ key, label, count, settled }) => (
+                <button
+                  key={key}
+                  type="button"
+                  aria-pressed={activePeriod === key}
+                  onClick={() => openPeriod(key)}
+                  className={`inline-flex shrink-0 items-center gap-2 rounded-xl border px-3 py-2 text-xs font-bold focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-indigo-500 ${
+                    activePeriod === key
+                      ? 'border-indigo-700 bg-indigo-700 text-white'
+                      : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-indigo-200 hover:bg-indigo-50'
+                  }`}
+                >
+                  {settled && <CheckCircle2 className={`h-3.5 w-3.5 ${activePeriod === key ? 'text-white' : 'text-emerald-600'}`} aria-hidden="true" />}
+                  {label}
+                  <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${activePeriod === key ? 'bg-white/20' : 'bg-slate-200'}`}>
+                    {count}
+                  </span>
+                  {settled && <span className="sr-only">Todas las cuotas pagadas</span>}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <section aria-labelledby="tuition-record-title" className="rounded-2xl border border-slate-200/80 bg-white p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 id="tuition-record-title" className="text-sm font-black text-slate-900">
+                Registro de cuotas · {periodTitle}
+              </h3>
+              {settled && (
+                <span className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-2 py-1 text-xs font-bold text-emerald-700">
+                  <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+                  Todas las cuotas pagadas
+                </span>
+              )}
+            </div>
+            <dl className="mt-3 grid grid-cols-2 gap-3 border-t border-slate-100 pt-3 text-xs sm:grid-cols-4">
+              <div>
+                <dt className="font-medium text-slate-500">Cuotas emitidas</dt>
+                <dd className="mt-0.5 font-bold text-slate-900">{counts.all}</dd>
+              </div>
+              <div>
+                <dt className="font-medium text-slate-500">Cuotas pagadas</dt>
+                <dd className="mt-0.5 font-bold text-emerald-700">{counts.paid} de {counts.all}</dd>
+              </div>
+              <div>
+                <dt className="font-medium text-slate-500">Monto emitido</dt>
+                <dd className="mt-0.5 font-bold text-slate-900">{formatCurrency(counts.issuedAmount)}</dd>
+              </div>
+              <div>
+                <dt className="font-medium text-slate-500">Saldo por cobrar</dt>
+                <dd className="mt-0.5 font-bold text-slate-900">{formatCurrency(counts.outstandingAmount)}</dd>
+              </div>
+            </dl>
+          </section>
+
           {/* Search & Tabs Toolbar */}
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between rounded-2xl bg-white p-4 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.02)] border border-slate-200/80">
             
             {/* Pestañas de Filtro */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
+            <div role="group" aria-label="Estado de la cuota" className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
               <button
                 onClick={() => setSelectedTab('ALL')}
                 className={`inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-bold transition-all duration-200 shrink-0 ${
@@ -256,7 +381,7 @@ export function TuitionControlSection({
                 }`}
               >
                 <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
-                <span>Al Día / Pagados</span>
+                <span>Pagadas</span>
                 <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
                   selectedTab === 'PAID' ? 'bg-emerald-800 text-white' : 'bg-emerald-200/80 text-emerald-900'
                 }`}>
@@ -282,6 +407,7 @@ export function TuitionControlSection({
           <div className="overflow-hidden rounded-2xl bg-white shadow-[0_4px_25px_-5px_rgba(0,0,0,0.03)] border border-slate-200/80">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs text-slate-600">
+                <caption className="sr-only">Listado de cuotas · {periodTitle}</caption>
                 <thead className="bg-slate-50/70 border-b border-slate-200/80 text-[10px] uppercase font-black text-slate-400 tracking-wider">
                   <tr>
                     <th scope="col" className="px-5 py-4">Estudiante</th>
@@ -299,8 +425,16 @@ export function TuitionControlSection({
                     <tr>
                       <td colSpan={8} className="px-6 py-12 text-center text-slate-400">
                         <AlertCircle className="mx-auto h-8 w-8 mb-2 text-slate-300" />
-                        <p className="text-sm font-bold text-slate-600">No se encontraron mensualidades</p>
-                        <p className="text-xs text-slate-400 font-normal mt-0.5">Intenta con otro término de búsqueda o cambia de filtro.</p>
+                        <p className="text-sm font-bold text-slate-600">
+                          {periodFees.length === 0 ? 'No hay mensualidades en este periodo' : 'No se encontraron mensualidades'}
+                        </p>
+                        <p className="text-xs text-slate-400 font-normal mt-0.5">
+                          {initialFees.length === 0
+                            ? 'Las cuotas aparecerán aquí cuando se emitan.'
+                            : periodFees.length === 0
+                              ? 'Selecciona otro mes para consultar sus cuotas.'
+                              : 'Intenta con otro término de búsqueda o cambia de filtro.'}
+                        </p>
                       </td>
                     </tr>
                   ) : (
@@ -386,7 +520,7 @@ export function TuitionControlSection({
                             </div>
                             <div className="text-[11px] text-slate-400 flex items-center gap-1 mt-0.5">
                               <Calendar className="h-3 w-3 text-slate-400" />
-                              <span>Vence: {formatDate(fee.dueDate)}</span>
+                              <span>Vence: {formatTuitionDate(fee.dueDate)}</span>
                             </div>
                           </td>
 
@@ -427,12 +561,12 @@ export function TuitionControlSection({
                               <div>
                                 <span className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-700 border border-emerald-200 shadow-sm">
                                   <CheckCircle2 className="h-3 w-3 text-emerald-600" />
-                                  Al Día
+                                  Pagada
                                 </span>
                                 {fee.payments && fee.payments.length > 0 && (
                                   <div className="space-y-0.5 mt-0.5">
                                     <div className="text-[10px] text-slate-400 pl-1">
-                                      {formatDate(fee.payments[0].paymentDate)}
+                                      Pago del {formatTuitionDate(fee.payments[0].paymentDate)}
                                     </div>
                                     {fee.payments[0].invoiceNumber && (
                                       <div 
@@ -507,7 +641,9 @@ export function TuitionControlSection({
 
                           {/* Acción: Registrar Pago o Ver Recibo */}
                           <td className="px-5 py-4.5 text-right">
-                            {!isPaid ? (
+                            {fee.blockedByPeriod ? (
+                              <TuitionPaymentBlocked period={fee.blockedByPeriod} />
+                            ) : !isPaid ? (
                               <button
                                 onClick={() => setSelectedFeeForPayment(fee)}
                                 className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-700 px-3 py-1.5 text-xs font-bold text-white shadow-sm shadow-indigo-600/20 hover:from-indigo-700 hover:to-indigo-800 transition-all duration-150 hover:scale-[1.02] active:scale-[0.98]"

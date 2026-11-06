@@ -31,7 +31,7 @@ import {
   StudentBreakdownInCourse,
   SerializedTuitionFee 
 } from '@/actions/finance';
-import { formatCurrency, formatDate, getMonthName } from '@/lib/utils';
+import { formatCurrency, formatTuitionDate, getMonthName } from '@/lib/utils';
 import { buildWhatsAppUrl } from '@/lib/ecuador-validators';
 import { PaymentModal } from './PaymentModal';
 import { PaymentReceiptModal } from './PaymentReceiptModal';
@@ -157,7 +157,7 @@ export function CourseFinanceBreakdown({ initialData }: CourseFinanceBreakdownPr
             {formatCurrency(currentFilteredTotals.pendingOrOverdue)}
           </p>
           <p className="mt-1 text-[11px] font-semibold text-rose-600">
-            Saldo por cobrar este periodo
+            Saldo acumulado de cuotas por cobrar
           </p>
         </div>
 
@@ -469,6 +469,16 @@ export function CourseFinanceBreakdown({ initialData }: CourseFinanceBreakdownPr
                                   <span className="inline-flex items-center rounded-lg bg-slate-100 px-2.5 py-0.5 text-[10px] font-medium text-slate-500 border border-slate-200">
                                     Sin emitir
                                   </span>
+                                )}
+                                {st.nextPaymentDate && st.contextualStatus === 'PAID' && (
+                                  <p className="mt-1 text-[11px] font-medium text-slate-600">
+                                    Próximo cobro {formatTuitionDate(st.nextPaymentDate)}
+                                  </p>
+                                )}
+                                {st.unpaidFeesCount > 1 && (
+                                  <p className="mt-1 text-[11px] font-medium text-slate-600">
+                                    {st.unpaidFeesCount} cuotas por cobrar · {formatCurrency(st.outstandingBalance)}
+                                  </p>
                                 )}
                               </td>
 

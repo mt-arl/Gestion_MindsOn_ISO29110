@@ -18,6 +18,7 @@ import {
   ArrowRight
 } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
+import { tuitionDay } from '@/lib/tuition-dates';
 
 // Desactivar caché estática para reflejar datos financieros en tiempo real
 export const dynamic = 'force-dynamic';
@@ -38,6 +39,7 @@ export default async function DashboardPage() {
   ]);
 
   const { metrics, fees } = dashboardData;
+  const today = tuitionDay(new Date());
 
   return (
     <div className="min-h-screen bg-slate-50/50 pb-16">
@@ -99,6 +101,7 @@ export default async function DashboardPage() {
         <section aria-label="Control de Pagos y Mensualidades" className="space-y-3">
           <TuitionControlSection 
             initialFees={fees} 
+            currentPeriod={{ month: today.getUTCMonth() + 1, year: today.getUTCFullYear() }}
             courseBreakdownData={courseBreakdownData} 
             initialMonthlyHistoryData={monthlyHistoryData}
             initialAnnualCashflowData={annualCashflowData}

@@ -11,7 +11,6 @@ import {
   Users, 
   BookOpen, 
   LayoutDashboard,
-  CalendarDays,
   Menu,
   X,
   Clock,
@@ -20,13 +19,11 @@ import {
   Loader2
 } from 'lucide-react';
 import { formatDate } from '@/lib/utils';
-import { GenerateTuitionsModal } from './GenerateTuitionsModal';
 import { logoutAction } from '@/actions/auth';
 
 export function Header() {
   const pathname = usePathname();
   const today = new Date();
-  const [isGenerateModalOpen, setIsGenerateModalOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isLoggingOut, startLogoutTransition] = useTransition();
 
@@ -111,16 +108,6 @@ export function Header() {
 
           {/* 3. Right Action Controls */}
           <div className="flex items-center gap-2 sm:gap-2.5">
-            {/* Quick Action Button: Emitir Cuotas */}
-            <button
-              onClick={() => setIsGenerateModalOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200/70 px-3 py-1.5 text-xs font-bold transition-all shadow-2xs hover:scale-[1.02] active:scale-[0.98]"
-              title="Generar masivamente las mensualidades del mes"
-            >
-              <CalendarDays className="h-3.5 w-3.5 text-indigo-600 shrink-0" />
-              <span className="hidden sm:inline">Emitir Cuotas</span>
-            </button>
-
             {/* Date Badge (Hidden on mobile) */}
             <div className="hidden lg:flex items-center gap-1.5 rounded-xl bg-slate-50 px-3 py-1.5 text-xs text-slate-600 border border-slate-200/60 font-medium">
               <Calendar className="h-3.5 w-3.5 text-slate-400" />
@@ -218,19 +205,6 @@ export function Header() {
                 })}
               </nav>
 
-              {/* Emitir Cuotas en Drawer */}
-              <div className="pt-2">
-                <button
-                  onClick={() => {
-                    setIsMobileMenuOpen(false);
-                    setIsGenerateModalOpen(true);
-                  }}
-                  className="w-full flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-bold text-white shadow-sm shadow-indigo-600/20 hover:bg-indigo-700 active:scale-[0.98] transition-all"
-                >
-                  <CalendarDays className="h-4 w-4" />
-                  Emitir Cuotas del Periodo
-                </button>
-              </div>
             </div>
 
             {/* Drawer Bottom Info & Logout */}
@@ -274,11 +248,6 @@ export function Header() {
         </div>
       )}
 
-      {/* Modal de emisión masiva */}
-      <GenerateTuitionsModal
-        isOpen={isGenerateModalOpen}
-        onClose={() => setIsGenerateModalOpen(false)}
-      />
     </>
   );
 }

@@ -17,7 +17,6 @@ import {
   HeartPulse,
   FileText,
   Check,
-  Calendar,
   Landmark,
   Copy,
   CheckCheck
@@ -74,11 +73,6 @@ export function CreateStudentModal({ isOpen, onClose, classes }: CreateStudentMo
     setTimeout(() => setCopiedInvoiceFeedback(false), 2000);
   };
 
-  // Personalización de fecha del primer pago
-  const [customDateEnabled, setCustomDateEnabled] = useState(false);
-  const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
-  const [customFirstPaymentDate, setCustomFirstPaymentDate] = useState(todayStr);
-
   // Validaciones en vivo
   const ciValidation = useMemo(() => {
     if (!ci.trim()) return { isValid: true };
@@ -106,7 +100,6 @@ export function CreateStudentModal({ isOpen, onClose, classes }: CreateStudentMo
     if (guardianPhone2 && !guardian2Validation.isValid) return false;
     if (hasDisability && !disabilityDescription.trim()) return false;
     if (Number(monthlyFee) < 0 || isNaN(Number(monthlyFee))) return false;
-    if (customDateEnabled && !customFirstPaymentDate) return false;
     return true;
   }, [
     ci,
@@ -122,8 +115,6 @@ export function CreateStudentModal({ isOpen, onClose, classes }: CreateStudentMo
     hasDisability,
     disabilityDescription,
     monthlyFee,
-    customDateEnabled,
-    customFirstPaymentDate,
   ]);
 
   if (!isOpen) return null;
@@ -184,7 +175,6 @@ export function CreateStudentModal({ isOpen, onClose, classes }: CreateStudentMo
         invoiceAddress: invoiceAddress.trim() || null,
         invoicePhone: invoicePhone.trim() || null,
         currentClassId: currentClassId || null,
-        customFirstPaymentDate: customDateEnabled ? customFirstPaymentDate : undefined,
       });
 
       if (res.success) {
@@ -213,8 +203,6 @@ export function CreateStudentModal({ isOpen, onClose, classes }: CreateStudentMo
           setInvoiceEmail('');
           setInvoiceAddress('');
           setInvoicePhone('');
-          setCustomDateEnabled(false);
-          setCustomFirstPaymentDate(todayStr);
         }, 1500);
       } else {
         setError(res.message);
@@ -539,40 +527,9 @@ export function CreateStudentModal({ isOpen, onClose, classes }: CreateStudentMo
               </div>
             </div>
 
-            {/* Toggle Personalizar fecha del primer pago / vencimiento */}
-            <div className="pt-2 border-t border-slate-100">
-              <label className="flex items-center gap-2 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={customDateEnabled}
-                  onChange={(e) => setCustomDateEnabled(e.target.checked)}
-                  className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                />
-                <span className="text-xs font-semibold text-slate-700">
-                  Personalizar fecha del primer pago / vencimiento
-                </span>
-              </label>
-
-              {customDateEnabled && (
-                <div className="mt-2.5 p-3 rounded-xl bg-indigo-50/50 border border-indigo-100 animate-in fade-in duration-150">
-                  <label className="block text-xs font-semibold text-indigo-900 mb-1 flex items-center gap-1.5">
-                    <Calendar className="h-3.5 w-3.5 text-indigo-600" />
-                    Fecha de Vencimiento de la Primera Cuota *
-                  </label>
-                  <input
-                    type="date"
-                    min={todayStr}
-                    required={customDateEnabled}
-                    value={customFirstPaymentDate}
-                    onChange={(e) => setCustomFirstPaymentDate(e.target.value)}
-                    className="w-full sm:w-60 rounded-xl border border-indigo-200 bg-white px-3 py-2 text-xs font-bold text-slate-800 focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-500/10"
-                  />
-                  <p className="text-[10px] text-indigo-600/80 mt-1">
-                    Se fijará el vencimiento de la primera cuota y el ciclo contable para esta fecha.
-                  </p>
-                </div>
-              )}
-            </div>
+            <p className="text-xs text-slate-500">
+              La primera cuota vence un mes después de la matrícula. Las siguientes conservan ese día de cada mes.
+            </p>
           </div>
 
           {/* 4. Apartado de Facturación SRI (Manual) */}

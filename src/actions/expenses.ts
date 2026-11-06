@@ -5,6 +5,7 @@ import prisma from '@/lib/prisma';
 import { ExpenseType, ExpenseCategory, PaymentMethod } from '@prisma/client';
 import { getMonthName } from '@/lib/utils';
 import { EXPENSE_CATEGORY_LABELS } from '@/lib/expense-constants';
+import { requireAuth } from '@/lib/require-auth';
 
 export type SerializedExpense = {
   id: string;
@@ -134,6 +135,7 @@ export async function getMonthlyFinancialBalanceAction(
   month?: number
 ): Promise<MonthlyFinancialBalanceResponse> {
   try {
+    await requireAuth();
     const now = new Date();
     const targetYear = typeof year === 'number' && year >= 2020 && year <= 2100 ? year : now.getFullYear();
     const targetMonth = typeof month === 'number' && month >= 1 && month <= 12 ? month : now.getMonth() + 1;
@@ -307,6 +309,7 @@ export async function createExpenseAction(data: {
   recurringExpenseId?: string | null;
 }): Promise<{ success: boolean; message: string; expenseId?: string }> {
   try {
+    await requireAuth();
     const titleClean = data.title?.trim();
     if (!titleClean) {
       return { success: false, message: 'La descripción o concepto del gasto es obligatoria.' };
@@ -388,6 +391,7 @@ export async function updateExpenseAction(
   }
 ): Promise<{ success: boolean; message: string }> {
   try {
+    await requireAuth();
     if (!id) {
       return { success: false, message: 'ID de gasto no proporcionado.' };
     }
@@ -442,6 +446,7 @@ export async function updateExpenseAction(
  */
 export async function deleteExpenseAction(id: string): Promise<{ success: boolean; message: string }> {
   try {
+    await requireAuth();
     if (!id) {
       return { success: false, message: 'ID de gasto no proporcionado.' };
     }
@@ -472,6 +477,7 @@ export async function deleteExpenseAction(id: string): Promise<{ success: boolea
  */
 export async function getRecurringExpensesAction(): Promise<SerializedRecurringExpense[]> {
   try {
+    await requireAuth();
     const templates = await prisma.recurringExpense.findMany({
       orderBy: [
         { isActive: 'desc' },
@@ -512,6 +518,7 @@ export async function createRecurringExpenseAction(data: {
   isActive?: boolean;
 }): Promise<{ success: boolean; message: string; recurringExpenseId?: string }> {
   try {
+    await requireAuth();
     const titleClean = data.title?.trim();
     if (!titleClean) {
       return { success: false, message: 'El concepto o título del gasto recurrente es obligatorio.' };
@@ -573,6 +580,7 @@ export async function updateRecurringExpenseAction(
   }
 ): Promise<{ success: boolean; message: string }> {
   try {
+    await requireAuth();
     if (!id) return { success: false, message: 'ID de plantilla no proporcionado.' };
 
     const titleClean = data.title?.trim();
@@ -636,6 +644,7 @@ export async function toggleRecurringExpenseAction(
   isActive: boolean
 ): Promise<{ success: boolean; message: string }> {
   try {
+    await requireAuth();
     if (!id) return { success: false, message: 'ID no proporcionado.' };
 
     const updated = await prisma.recurringExpense.update({
@@ -667,6 +676,7 @@ export async function deleteRecurringExpenseAction(
   id: string
 ): Promise<{ success: boolean; message: string }> {
   try {
+    await requireAuth();
     if (!id) return { success: false, message: 'ID no proporcionado.' };
 
     const existing = await prisma.recurringExpense.findUnique({

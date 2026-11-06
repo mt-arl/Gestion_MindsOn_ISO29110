@@ -17,7 +17,7 @@ import {
   Receipt
 } from 'lucide-react';
 import { SerializedTuitionFee, registerPaymentAction } from '@/actions/finance';
-import { formatCurrency, formatDate, getMonthName } from '@/lib/utils';
+import { formatCurrency, formatTuitionDate, getMonthName } from '@/lib/utils';
 import { PaymentReceiptModal } from './PaymentReceiptModal';
 
 interface PaymentModalProps {
@@ -157,7 +157,7 @@ export function PaymentModal({
                     Fecha Límite:
                   </span>
                   <span className="font-bold text-slate-600">
-                    {formatDate(fee.dueDate)}
+                    {formatTuitionDate(fee.dueDate)}
                   </span>
                 </div>
 

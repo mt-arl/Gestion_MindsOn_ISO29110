@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import prisma from '@/lib/prisma';
 import { CourseBook } from '@prisma/client';
+import { requireAuth } from '@/lib/require-auth';
 
 export interface SerializedBook {
   id: string;
@@ -23,6 +24,7 @@ export interface SerializedBook {
  */
 export async function ensureDefaultBooksAndLinkClasses(): Promise<void> {
   try {
+    await requireAuth();
     const count = await prisma.book.count();
 
     if (count === 0) {
@@ -97,6 +99,7 @@ export async function ensureDefaultBooksAndLinkClasses(): Promise<void> {
  */
 export async function getBooksAction(includeInactive: boolean = false): Promise<SerializedBook[]> {
   try {
+    await requireAuth();
     await ensureDefaultBooksAndLinkClasses();
 
     const books = await prisma.book.findMany({
@@ -141,6 +144,7 @@ export async function createBookAction(data: {
   sortOrder?: number;
 }): Promise<{ success: boolean; message: string; book?: SerializedBook }> {
   try {
+    await requireAuth();
     const nameClean = data.name?.trim();
     const shortNameClean = data.shortName?.trim();
 
@@ -216,6 +220,7 @@ export async function updateBookAction(
   }
 ): Promise<{ success: boolean; message: string }> {
   try {
+    await requireAuth();
     if (!id) {
       return { success: false, message: 'ID de libro no proporcionado.' };
     }
@@ -273,6 +278,7 @@ export async function updateBookAction(
  */
 export async function deleteBookAction(id: string): Promise<{ success: boolean; message: string }> {
   try {
+    await requireAuth();
     if (!id) {
       return { success: false, message: 'ID de libro no proporcionado.' };
     }

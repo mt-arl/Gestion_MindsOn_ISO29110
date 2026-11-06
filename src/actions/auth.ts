@@ -10,76 +10,10 @@ import {
   verifySessionToken,
   SessionPayload,
 } from '@/lib/auth-token';
-
-const MASTER_ADMIN = {
-  email: 'mindsonec@gmail.com',
-  password: 'mindson26',
-  name: 'Administrador MindsOn',
-  role: AdminRole.ADMIN,
-};
-
-/**
- * Genera un hash criptográfico SHA-256 con salt usando Web Crypto API
- * (Compatible nativamente con Node.js y Edge Runtime sin requerir módulos nativos C++)
- */
-async function hashPassword(password: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(password + ':mindson_salt_2026');
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(hashBuffer))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
-}
-
-/**
- * Valida una contraseña contra el hash almacenado en base de datos
- */
-async function verifyPassword(password: string, storedHash: string): Promise<boolean> {
-  // 1. Verificación principal: Hash SHA-256 con salt
-  const computed = await hashPassword(password);
-  if (computed === storedHash) return true;
-
-  // 2. Verificación secundaria: Hash SHA-256 plano (sin salt)
-  const encoder = new TextEncoder();
-  const rawBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(password));
-  const rawHash = Array.from(new Uint8Array(rawBuffer))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
-  if (rawHash === storedHash) return true;
-
-  // 3. Fallback de texto plano por compatibilidad
-  if (password === storedHash) return true;
-
-  return false;
-}
-
-/**
- * Auto-aprovisionamiento seguro del usuario administrador oficial MindsOn
- * Verifica si existe mindsonec@gmail.com en prisma.adminUser; si no existe, lo crea automáticamente.
- */
-async function ensureAdminUserExists(): Promise<void> {
-  try {
-    const normalizedEmail = MASTER_ADMIN.email.toLowerCase().trim();
-    const existing = await prisma.adminUser.findUnique({
-      where: { email: normalizedEmail },
-    });
-
-    if (!existing) {
-      const passwordHash = await hashPassword(MASTER_ADMIN.password);
-      await prisma.adminUser.create({
-        data: {
-          name: MASTER_ADMIN.name,
-          email: normalizedEmail,
-          passwordHash,
-          role: MASTER_ADMIN.role,
-        },
-      });
-      console.log(`[AUTH] Usuario administrador maestro (${normalizedEmail}) creado exitosamente.`);
-    }
-  } catch (error) {
-    console.error('[AUTH] Error en auto-aprovisionamiento del usuario administrador:', error);
-  }
-}
+import {
+  verifyPassword,
+  ensureAdminUserExists,
+} from '@/lib/auth-service';
 
 /**
  * Server Action de Inicio de Sesión
