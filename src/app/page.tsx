@@ -1,6 +1,5 @@
 import React from 'react';
 import { Header } from '@/components/Header';
-import { MetricCards } from '@/components/MetricCards';
 import { TuitionControlSection } from '@/components/TuitionControlSection';
 import { 
   getFinancialDashboardData, 
@@ -9,15 +8,7 @@ import {
   getAnnualCashflowSummaryAction
 } from '@/actions/finance';
 import { getMonthlyFinancialBalanceAction } from '@/actions/expenses';
-import { 
-  AlertOctagon, 
-  TrendingUp, 
-  ShieldAlert, 
-  Sparkles, 
-  Layers,
-  ArrowRight
-} from 'lucide-react';
-import { formatCurrency } from '@/lib/utils';
+import { Sparkles } from 'lucide-react';
 import { tuitionDay } from '@/lib/tuition-dates';
 
 // Desactivar caché estática para reflejar datos financieros en tiempo real
@@ -38,7 +29,7 @@ export default async function DashboardPage() {
     getMonthlyFinancialBalanceAction(),
   ]);
 
-  const { metrics, fees } = dashboardData;
+  const { fees } = dashboardData;
   const today = tuitionDay(new Date());
 
   return (
@@ -67,35 +58,6 @@ export default async function DashboardPage() {
             </span>
           </div>
         </div>
-
-        {/* Alerta Destacada si existen estudiantes en mora */}
-        {metrics.overdueCount > 0 && (
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 rounded-2xl bg-gradient-to-r from-rose-500/90 via-rose-600/95 to-rose-600 p-5 text-white shadow-xl shadow-rose-500/10 border border-rose-500/20">
-            <div className="flex items-center gap-3.5">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/10 border border-white/15 backdrop-blur-md shadow-inner">
-                <AlertOctagon className="h-5 w-5 text-rose-100" />
-              </div>
-              <div>
-                <h3 className="font-black text-sm sm:text-base leading-tight tracking-wide">
-                  Atención Requerida: {metrics.overdueCount} {metrics.overdueCount === 1 ? 'mensualidad vencida' : 'mensualidades vencidas'} detectadas
-                </h3>
-                <p className="text-xs text-rose-100/90 mt-1 font-medium">
-                  Monto total acumulado en mora: <strong className="text-white underline decoration-white/40 underline-offset-2">{formatCurrency(metrics.totalOverdue)}</strong> correspondiente a {metrics.overdueStudentsCount} {metrics.overdueStudentsCount === 1 ? 'estudiante' : 'estudiantes'}.
-                </p>
-              </div>
-            </div>
-            <div className="shrink-0">
-              <span className="inline-flex items-center gap-1.5 rounded-xl bg-white px-3.5 py-1.5 text-xs font-black text-rose-700 shadow-[0_4px_12px_rgba(0,0,0,0.05)] border border-rose-100/20">
-                Cobranza Prioritaria
-              </span>
-            </div>
-          </div>
-        )}
-
-        {/* Tarjetas de Métricas (KPIs) */}
-        <section aria-label="Métricas Financieras">
-          <MetricCards metrics={metrics} />
-        </section>
 
         {/* Sección de Control de Mensualidades y Cobranzas */}
         <section aria-label="Control de Pagos y Mensualidades" className="space-y-3">

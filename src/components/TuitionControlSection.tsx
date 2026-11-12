@@ -17,6 +17,7 @@ import {
   Check,
   Calendar,
   AlertCircle,
+  AlertOctagon,
   Sparkles,
   Layers,
   GraduationCap,
@@ -33,6 +34,8 @@ import {
 import { MonthlyFinancialBalanceResponse } from '@/actions/expenses';
 import { formatCurrency, formatTuitionDate, getDaysDiffFromNow, getMonthName } from '@/lib/utils';
 import { buildWhatsAppUrl } from '@/lib/ecuador-validators';
+import { summarizeTuitionFees } from '@/lib/tuition-metrics';
+import { MetricCards } from './MetricCards';
 import { PaymentModal } from './PaymentModal';
 import { PaymentReceiptModal } from './PaymentReceiptModal';
 import { CourseFinanceBreakdown } from './CourseFinanceBreakdown';
@@ -94,9 +97,9 @@ export function TuitionControlSection({
     : currentPeriodKey;
   const monthlyRecord = activePeriod === 'ALL' ? undefined : periods.get(activePeriod);
   const periodFees = monthlyRecord?.fees ?? initialFees;
-  const periodTitle = monthlyRecord
-    ? `${getMonthName(monthlyRecord.month)} ${monthlyRecord.year}`
-    : 'Todos los meses';
+  const metricsPeriod = monthlyRecord ?? periods.get(currentPeriodKey)!;
+  const metricsPeriodTitle = `${getMonthName(metricsPeriod.month)} ${metricsPeriod.year}`;
+  const periodTitle = monthlyRecord ? metricsPeriodTitle : 'Todos los meses';
   const periodOptions = [
     { key: 'ALL' as const, label: 'Todos los meses', count: initialFees.length, settled: false },
     ...Array.from(periods.entries())
@@ -109,26 +112,12 @@ export function TuitionControlSection({
       })),
   ];
 
-  // El resumen siempre se calcula sobre el registro completo del periodo.
-  const counts = useMemo(() => {
-    const summary = { all: periodFees.length, overdue: 0, pending: 0, paid: 0, issuedAmount: 0, outstandingAmount: 0 };
-    for (const fee of periodFees) {
-      summary.issuedAmount += fee.amount;
-      if (fee.status === 'PAID') {
-        summary.paid++;
-      } else {
-        summary.outstandingAmount += fee.amount;
-        if (fee.status === 'OVERDUE') {
-          summary.overdue++;
-        } else {
-          summary.pending++;
-        }
-      }
-    }
-    return summary;
-  }, [periodFees]);
-
-  const settled = counts.all > 0 && counts.paid === counts.all;
+  const summary = useMemo(() => summarizeTuitionFees(periodFees), [periodFees]);
+  const metrics = useMemo(
+    () => metricsPeriod.fees === periodFees ? summary : summarizeTuitionFees(metricsPeriod.fees),
+    [metricsPeriod, periodFees, summary],
+  );
+  const settled = summary.feeCount > 0 && summary.paidCount === summary.feeCount;
 
   const openPeriod = (key: number | 'ALL') => {
     if (key === activePeriod) return;
@@ -166,6 +155,36 @@ export function TuitionControlSection({
 
   return (
     <div className="space-y-6">
+      <section aria-labelledby="monthly-metrics-title" className="space-y-4">
+        <h2 id="monthly-metrics-title" className="text-sm font-bold text-slate-700">
+          Métricas de {metricsPeriodTitle}
+        </h2>
+        {/* Alerta Destacada si existen estudiantes en mora */}
+        {metrics.overdueCount > 0 && (
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 rounded-2xl bg-gradient-to-r from-rose-500/90 via-rose-600/95 to-rose-600 p-5 text-white shadow-xl shadow-rose-500/10 border border-rose-500/20">
+            <div className="flex items-center gap-3.5">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/10 border border-white/15 backdrop-blur-md shadow-inner">
+                <AlertOctagon className="h-5 w-5 text-rose-100" />
+              </div>
+              <div>
+                <h3 className="font-black text-sm sm:text-base leading-tight tracking-wide">
+                  {metrics.overdueCount} {metrics.overdueCount === 1 ? 'mensualidad vencida' : 'mensualidades vencidas'}
+                </h3>
+                <p className="text-xs text-rose-100/90 mt-1 font-medium">
+                  El saldo vencido es de <strong className="text-white underline decoration-white/40 underline-offset-2">{formatCurrency(metrics.totalOverdue)}</strong> correspondiente a {metrics.overdueStudentsCount} {metrics.overdueStudentsCount === 1 ? 'estudiante' : 'estudiantes'}.
+                </p>
+              </div>
+            </div>
+            <div className="shrink-0">
+              <span className="inline-flex items-center gap-1.5 rounded-xl bg-white px-3.5 py-1.5 text-xs font-black text-rose-700 shadow-[0_4px_12px_rgba(0,0,0,0.05)] border border-rose-100/20">
+                Cobranza Prioritaria
+              </span>
+            </div>
+          </div>
+        )}
+        <MetricCards metrics={metrics} />
+      </section>
+
       {/* 1. Selector Superior de Vista Principal (Segmented Control Moderno) */}
       <div className="inline-flex flex-wrap items-center gap-1.5 p-1.5 bg-slate-100/90 border border-slate-200/80 rounded-2xl shadow-inner">
         {/* Tab 1: Control de Mensualidades */}
@@ -299,19 +318,19 @@ export function TuitionControlSection({
             <dl className="mt-3 grid grid-cols-2 gap-3 border-t border-slate-100 pt-3 text-xs sm:grid-cols-4">
               <div>
                 <dt className="font-medium text-slate-500">Cuotas emitidas</dt>
-                <dd className="mt-0.5 font-bold text-slate-900">{counts.all}</dd>
+                <dd className="mt-0.5 font-bold text-slate-900">{summary.feeCount}</dd>
               </div>
               <div>
                 <dt className="font-medium text-slate-500">Cuotas pagadas</dt>
-                <dd className="mt-0.5 font-bold text-emerald-700">{counts.paid} de {counts.all}</dd>
+                <dd className="mt-0.5 font-bold text-emerald-700">{summary.paidCount} de {summary.feeCount}</dd>
               </div>
               <div>
                 <dt className="font-medium text-slate-500">Monto emitido</dt>
-                <dd className="mt-0.5 font-bold text-slate-900">{formatCurrency(counts.issuedAmount)}</dd>
+                <dd className="mt-0.5 font-bold text-slate-900">{formatCurrency(summary.issuedAmount)}</dd>
               </div>
               <div>
                 <dt className="font-medium text-slate-500">Saldo por cobrar</dt>
-                <dd className="mt-0.5 font-bold text-slate-900">{formatCurrency(counts.outstandingAmount)}</dd>
+                <dd className="mt-0.5 font-bold text-slate-900">{formatCurrency(summary.outstandingAmount)}</dd>
               </div>
             </dl>
           </section>
@@ -334,7 +353,7 @@ export function TuitionControlSection({
                 <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
                   selectedTab === 'ALL' ? 'bg-slate-800 text-white border border-slate-700' : 'bg-slate-200/70 text-slate-600'
                 }`}>
-                  {counts.all}
+                  {summary.feeCount}
                 </span>
               </button>
 
@@ -351,7 +370,7 @@ export function TuitionControlSection({
                 <span className={`rounded-full px-2 py-0.5 text-[10px] font-extrabold ${
                   selectedTab === 'OVERDUE' ? 'bg-rose-800 text-white' : 'bg-rose-200/80 text-rose-800'
                 }`}>
-                  {counts.overdue}
+                  {summary.overdueCount}
                 </span>
               </button>
 
@@ -368,7 +387,7 @@ export function TuitionControlSection({
                 <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
                   selectedTab === 'PENDING' ? 'bg-amber-700 text-white' : 'bg-amber-200/80 text-amber-900'
                 }`}>
-                  {counts.pending}
+                  {summary.pendingCount}
                 </span>
               </button>
 
@@ -385,7 +404,7 @@ export function TuitionControlSection({
                 <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
                   selectedTab === 'PAID' ? 'bg-emerald-800 text-white' : 'bg-emerald-200/80 text-emerald-900'
                 }`}>
-                  {counts.paid}
+                  {summary.paidCount}
                 </span>
               </button>
             </div>

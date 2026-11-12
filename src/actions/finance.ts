@@ -66,21 +66,7 @@ export type SerializedTuitionFee = {
   }>;
 };
 
-export type FinancialMetrics = {
-  totalPaid: number;
-  paidCount: number;
-  totalPending: number;
-  pendingCount: number;
-  totalOverdue: number;
-  overdueCount: number;
-  activeStudentsCount: number;
-  overdueStudentsCount: number;
-  upToDateStudentsCount: number;
-  collectionRate: number; // Porcentaje de efectividad de cobranza
-};
-
 export type FinancialDashboardData = {
-  metrics: FinancialMetrics;
   fees: SerializedTuitionFee[];
 };
 
@@ -150,7 +136,7 @@ function blockingPeriod(fee: TuitionPeriod & { status: TuitionFeeStatus }, oldes
 }
 
 /**
- * 2. Obtiene los datos consolidados del Dashboard Financiero y Métricas del Mes
+ * 2. Obtiene las cuotas del panel financiero
  */
 export async function getFinancialDashboardData(
   month?: number,
@@ -182,44 +168,6 @@ export async function getFinancialDashboardData(
       { dueDate: 'asc' },
     ],
   });
-
-  // Consultar conteo de estudiantes activos
-  const activeStudents = await prisma.student.findMany({
-    where: { status: 'ACTIVE' },
-    select: { id: true },
-  });
-
-  // Cálculos de métricas
-  let totalPaid = 0;
-  let paidCount = 0;
-  let totalPending = 0;
-  let pendingCount = 0;
-  let totalOverdue = 0;
-  let overdueCount = 0;
-
-  const overdueStudentIdSet = new Set<string>();
-
-  for (const fee of tuitionFees) {
-    const amountNum = Number(fee.amount);
-    if (fee.status === TuitionFeeStatus.PAID) {
-      totalPaid += amountNum;
-      paidCount++;
-    } else if (fee.status === TuitionFeeStatus.PENDING) {
-      totalPending += amountNum;
-      pendingCount++;
-    } else if (fee.status === TuitionFeeStatus.OVERDUE) {
-      totalOverdue += amountNum;
-      overdueCount++;
-      overdueStudentIdSet.add(fee.studentId);
-    }
-  }
-
-  const activeStudentsCount = activeStudents.length;
-  const overdueStudentsCount = overdueStudentIdSet.size;
-  const upToDateStudentsCount = Math.max(0, activeStudentsCount - overdueStudentsCount);
-
-  const totalBilled = totalPaid + totalPending + totalOverdue;
-  const collectionRate = totalBilled > 0 ? (totalPaid / totalBilled) * 100 : 0;
 
   const earlierUnpaid = period && tuitionFees.length > 0
     ? await prisma.tuitionFee.findMany({
@@ -286,21 +234,7 @@ export async function getFinancialDashboardData(
     })),
   }));
 
-  return {
-    metrics: {
-      totalPaid,
-      paidCount,
-      totalPending,
-      pendingCount,
-      totalOverdue,
-      overdueCount,
-      activeStudentsCount,
-      overdueStudentsCount,
-      upToDateStudentsCount,
-      collectionRate: Math.round(collectionRate * 10) / 10,
-    },
-    fees: serializedFees,
-  };
+  return { fees: serializedFees };
 }
 
 export type PaymentReceiptData = {

@@ -4,15 +4,14 @@ import {
   Clock, 
   AlertTriangle, 
   Users, 
-  TrendingUp, 
   ArrowUpRight,
   ShieldAlert
 } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
-import { FinancialMetrics } from '@/actions/finance';
+import type { summarizeTuitionFees } from '@/lib/tuition-metrics';
 
 interface MetricCardsProps {
-  metrics: FinancialMetrics;
+  metrics: ReturnType<typeof summarizeTuitionFees>;
 }
 
 export function MetricCards({ metrics }: MetricCardsProps) {
@@ -33,10 +32,10 @@ export function MetricCards({ metrics }: MetricCardsProps) {
           <p className="text-3xl font-black tracking-tight text-slate-900">
             {formatCurrency(metrics.totalPaid)}
           </p>
-          <div className="mt-3 flex items-center gap-2 text-xs text-slate-500 font-medium">
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500 font-medium">
             <span className="inline-flex items-center rounded-lg bg-emerald-50 px-2.5 py-0.5 font-extrabold text-emerald-700 border border-emerald-100/60 shadow-sm">
               <ArrowUpRight className="mr-0.5 h-3.5 w-3.5" />
-              {metrics.paidCount} {metrics.paidCount === 1 ? 'pago' : 'pagos'}
+              {metrics.paidCount} {metrics.paidCount === 1 ? 'cuota pagada' : 'cuotas pagadas'}
             </span>
             <span>Tasa cobro: <strong className="text-slate-700">{metrics.collectionRate}%</strong></span>
           </div>
@@ -75,9 +74,11 @@ export function MetricCards({ metrics }: MetricCardsProps) {
             <span className="text-[10px] font-black uppercase tracking-wider text-rose-800 bg-rose-50 px-2 py-0.5 rounded-md border border-rose-200/50">
               Cartera Vencida
             </span>
-            <span className="rounded-full bg-rose-600 px-2 py-0.5 text-[9px] font-black text-white uppercase tracking-wider glow-active">
-              Mora
-            </span>
+            {metrics.overdueCount > 0 && (
+              <span className="rounded-full bg-rose-600 px-2 py-0.5 text-[9px] font-black text-white uppercase tracking-wider glow-active">
+                Mora
+              </span>
+            )}
           </div>
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-rose-600 text-white shadow-md shadow-rose-500/30">
             <ShieldAlert className="h-5 w-5" />
@@ -92,7 +93,6 @@ export function MetricCards({ metrics }: MetricCardsProps) {
               <AlertTriangle className="mr-0.5 h-3.5 w-3.5 text-rose-600" />
               {metrics.overdueStudentsCount} {metrics.overdueStudentsCount === 1 ? 'moroso' : 'morosos'}
             </span>
-            <span className="text-slate-400 font-medium">Requiere acción</span>
           </div>
         </div>
       </div>
@@ -102,7 +102,7 @@ export function MetricCards({ metrics }: MetricCardsProps) {
         <div className="absolute right-0 top-0 h-20 w-20 translate-x-4 -translate-y-4 rounded-full bg-slate-50/50 opacity-60 pointer-events-none" />
         <div className="flex items-center justify-between">
           <span className="text-[10px] font-black uppercase tracking-wider text-slate-800 bg-slate-50 px-2 py-0.5 rounded-md border border-slate-200/50">
-            Alumnos Activos
+            Alumnos con cuota
           </span>
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-50 text-slate-600 border border-slate-200/40">
             <Users className="h-5 w-5" />
@@ -110,11 +110,11 @@ export function MetricCards({ metrics }: MetricCardsProps) {
         </div>
         <div className="mt-4">
           <p className="text-3xl font-black tracking-tight text-slate-900">
-            {metrics.activeStudentsCount}
+            {metrics.studentsCount}
           </p>
           <div className="mt-3 flex items-center gap-1.5 text-[11px] font-bold">
             <span className="inline-flex items-center rounded-lg bg-emerald-50/70 px-2 py-0.5 text-emerald-700 border border-emerald-100/50">
-              {metrics.upToDateStudentsCount} al día
+              {metrics.studentsWithoutOverdueCount} sin mora
             </span>
             <span className="text-slate-300 font-medium">•</span>
             <span className="inline-flex items-center rounded-lg bg-rose-50/70 px-2 py-0.5 text-rose-700 border border-rose-100/50">
