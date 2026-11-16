@@ -135,6 +135,9 @@ model Student {
   enrollmentDate  DateTime      @default(now())
   nextPaymentDate DateTime?
   tuitionSyncedThrough DateTime? @db.Date
+  billingPausedAt DateTime?
+  billingResumedAt DateTime?
+  archivedAt      DateTime?
   age             Int
   gender          String
   address         String?

@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic';
 
 export default async function StudentsPage() {
   const [students, classes] = await Promise.all([
-    getStudentsList(),
+    getStudentsList(undefined, undefined, true),
     getClassesList(),
   ]);
 

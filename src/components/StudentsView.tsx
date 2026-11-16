@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useTransition } from 'react';
 import { 
   UserPlus, 
   Search, 
@@ -12,9 +12,12 @@ import {
   Edit3,
   History,
   Calendar,
-  Clock
+  Clock,
+  Archive,
+  PauseCircle,
+  PlayCircle,
 } from 'lucide-react';
-import { SerializedStudent, SerializedClass } from '@/actions/academic';
+import { archiveStudentAction, setStudentBillingPausedAction, type SerializedStudent, type SerializedClass } from '@/actions/academic';
 import { formatCurrency, formatTuitionDate } from '@/lib/utils';
 import { buildWhatsAppUrl } from '@/lib/ecuador-validators';
 import { CreateStudentModal } from './CreateStudentModal';
@@ -29,15 +32,43 @@ interface StudentsViewProps {
 export function StudentsView({ initialStudents, classes }: StudentsViewProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedClassFilter, setSelectedClassFilter] = useState('ALL');
+  const [showArchived, setShowArchived] = useState(false);
+  const [isPending, startTransition] = useTransition();
+  const [feedback, setFeedback] = useState<{ success: boolean; message: string } | null>(null);
   
   // Modales
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [studentToEdit, setStudentToEdit] = useState<SerializedStudent | null>(null);
   const [studentForHistoryId, setStudentForHistoryId] = useState<string | null>(null);
 
+  function changeStudent(student: SerializedStudent, archive = false) {
+    const paused = !student.billingPausedAt;
+    const name = `${student.firstName} ${student.lastName}`;
+    const question = archive
+      ? `¿Eliminar a ${name} del directorio? Si la cuota del mes está impaga y sin abonos, se retirará. Puedes consultar su historial en Archivados.`
+      : paused
+        ? `¿Pausar la cobranza de ${name}? Si la cuota del mes está impaga y sin abonos, se retirará. Las deudas anteriores seguirán disponibles para cobrar.`
+        : `¿Reanudar la cobranza de ${name} desde el próximo vencimiento?`;
+    if (!window.confirm(question)) return;
+
+    setFeedback(null);
+    startTransition(async () => {
+      try {
+        const result = archive
+          ? await archiveStudentAction(student.id)
+          : await setStudentBillingPausedAction(student.id, paused);
+        setFeedback(result);
+      } catch {
+        setFeedback({ success: false, message: 'No se pudo completar la operación.' });
+      }
+    });
+  }
+
   // Filtrado de alumnos
   const filteredStudents = useMemo(() => {
     return initialStudents.filter((student) => {
+      if (Boolean(student.archivedAt) !== showArchived) return false;
+
       // Filtro de clase
       if (selectedClassFilter !== 'ALL') {
         if (selectedClassFilter === 'UNASSIGNED') {
@@ -62,7 +93,9 @@ export function StudentsView({ initialStudents, classes }: StudentsViewProps) {
         phone.includes(query)
       );
     });
-  }, [initialStudents, selectedClassFilter, searchTerm]);
+  }, [initialStudents, selectedClassFilter, searchTerm, showArchived]);
+
+  const archivedCount = initialStudents.filter((student) => student.archivedAt).length;
 
   return (
     <div className="space-y-6">
@@ -86,18 +119,37 @@ export function StudentsView({ initialStudents, classes }: StudentsViewProps) {
         </button>
       </div>
 
+      {feedback && (
+        <p role={feedback.success ? 'status' : 'alert'} className={`text-sm font-semibold ${feedback.success ? 'text-emerald-700' : 'text-rose-700'}`}>
+          {feedback.message}
+        </p>
+      )}
+
       {/* Toolbar: Search & Class Filter */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-2xl bg-white p-4 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.02)] border border-slate-200/80">
         
         {/* Selector de Clase */}
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            aria-pressed={showArchived}
+            onClick={() => {
+              setShowArchived(!showArchived);
+              setSelectedClassFilter('ALL');
+            }}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-700 aria-pressed:bg-indigo-50 aria-pressed:text-indigo-700"
+          >
+            <Archive className="h-4 w-4" />
+            Archivados ({archivedCount})
+          </button>
+          {!showArchived && <>
           <Filter className="h-4 w-4 text-slate-400" />
           <select
             value={selectedClassFilter}
             onChange={(e) => setSelectedClassFilter(e.target.value)}
             className="rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2 text-xs font-bold text-slate-700 focus:border-indigo-500 focus:bg-white focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all duration-200"
           >
-            <option value="ALL">Todas las Clases ({initialStudents.length} alumnos)</option>
+            <option value="ALL">Todas las Clases ({initialStudents.length - archivedCount} alumnos)</option>
             <option value="UNASSIGNED">Sin Curso Asignado</option>
             {classes.map((c) => (
               <option key={c.id} value={c.id}>
@@ -105,6 +157,7 @@ export function StudentsView({ initialStudents, classes }: StudentsViewProps) {
               </option>
             ))}
           </select>
+          </>}
         </div>
 
         {/* Input de Búsqueda */}
@@ -219,7 +272,12 @@ export function StudentsView({ initialStudents, classes }: StudentsViewProps) {
 
                       {/* Próximo Cobro */}
                       <td className="px-5 py-4.5">
-                        {student.nextPaymentDate ? (
+                        {!student.archivedAt && student.billingPausedAt ? (
+                          <span className="inline-flex items-center gap-1 text-xs font-bold text-amber-700">
+                            <PauseCircle className="h-3.5 w-3.5" />
+                            Cobranza pausada
+                          </span>
+                        ) : student.nextPaymentDate ? (
                           <div className="space-y-0.5">
                             <span className="inline-flex items-center gap-1 text-slate-900 font-bold text-xs">
                               <Calendar className="h-3 w-3 text-indigo-600" />
@@ -305,7 +363,7 @@ export function StudentsView({ initialStudents, classes }: StudentsViewProps) {
                             ? 'bg-rose-50 text-rose-700 border-rose-200'
                             : 'bg-slate-100 text-slate-600 border-slate-200'
                         }`}>
-                          {student.status === 'ACTIVE'
+                          {student.archivedAt ? 'Archivado' : student.status === 'ACTIVE'
                             ? 'Activo'
                             : student.status === 'GRADUATED'
                             ? 'Graduado'
@@ -343,6 +401,7 @@ export function StudentsView({ initialStudents, classes }: StudentsViewProps) {
                             <span className="hidden sm:inline">Kardex</span>
                           </button>
 
+                          {!student.archivedAt && <>
                           {/* Botón Editar */}
                           <button
                             onClick={() => setStudentToEdit(student)}
@@ -352,6 +411,26 @@ export function StudentsView({ initialStudents, classes }: StudentsViewProps) {
                             <Edit3 className="h-3.5 w-3.5" />
                             <span className="hidden sm:inline">Editar</span>
                           </button>
+                          <button
+                            type="button"
+                            disabled={isPending}
+                            onClick={() => changeStudent(student)}
+                            className="inline-flex items-center gap-1 whitespace-nowrap rounded-xl bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+                          >
+                            {student.billingPausedAt ? <PlayCircle className="h-3.5 w-3.5" /> : <PauseCircle className="h-3.5 w-3.5" />}
+                            {student.billingPausedAt ? 'Reanudar cobro' : 'Pausar cobro'}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={isPending}
+                            onClick={() => changeStudent(student, true)}
+                            title="Eliminar del directorio y conservar el Kardex"
+                            className="inline-flex items-center gap-1 rounded-xl bg-rose-50 px-3 py-1.5 text-xs font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-50"
+                          >
+                            <Archive className="h-3.5 w-3.5" />
+                            Eliminar
+                          </button>
+                          </>}
                         </div>
                       </td>
                     </tr>

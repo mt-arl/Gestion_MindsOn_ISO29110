@@ -15,7 +15,7 @@ import { validateEcuadorianId, validateEcuadorianPhone } from '@/lib/ecuador-val
 import { checkClassroomConflictForClass } from '@/lib/classroom-conflicts';
 import { ensureDefaultBooksAndLinkClasses } from '@/actions/books';
 import { requireAuth } from '@/lib/require-auth';
-import { issueMonthlyTuitions, syncMonthlyTuitions, updateStudentTuitionDeadlines, withTuitionTransaction } from '@/lib/tuition-billing';
+import { issueMonthlyTuitions, removeUnpaidCurrentTuition, syncMonthlyTuitions, updateStudentTuitionDeadlines, withTuitionTransaction } from '@/lib/tuition-billing';
 import { parseTuitionDateInput, TUITION_TIME_ZONE, tuitionDay, tuitionPeriod, upcomingTuitionDate } from '@/lib/tuition-dates';
 
 export type SerializedTeacher = {
@@ -67,6 +67,8 @@ export type SerializedStudent = {
   guardianPhone1: string | null;
   guardianPhone2: string | null;
   enrollmentDate: string;
+  billingPausedAt: string | null;
+  archivedAt: string | null;
   nextPaymentDate: string | null;
   age: number;
   gender: string;
@@ -549,12 +551,13 @@ export async function resumeClassAction(
  */
 export async function getStudentsList(
   search?: string,
-  filterClassId?: string
+  filterClassId?: string,
+  includeArchived = false,
 ): Promise<SerializedStudent[]> {
   try {
     await requireAuth();
     await syncMonthlyTuitions();
-    const whereCondition: Record<string, unknown> = {};
+    const whereCondition: Record<string, unknown> = includeArchived ? {} : { archivedAt: null };
 
     if (filterClassId && filterClassId !== 'ALL') {
       whereCondition.currentClassId = filterClassId;
@@ -602,7 +605,9 @@ export async function getStudentsList(
         guardianPhone1: s.guardianPhone1,
         guardianPhone2: s.guardianPhone2,
         enrollmentDate: s.enrollmentDate.toISOString(),
-        nextPaymentDate: s.status === StudentStatus.ACTIVE && s.currentClass?.status === ClassStatus.ACTIVE
+        billingPausedAt: s.billingPausedAt?.toISOString() ?? null,
+        archivedAt: s.archivedAt?.toISOString() ?? null,
+        nextPaymentDate: !s.archivedAt && !s.billingPausedAt && s.status === StudentStatus.ACTIVE && s.currentClass?.status === ClassStatus.ACTIVE
           ? upcomingTuitionDate(
               s.enrollmentDate,
               now,
@@ -645,6 +650,77 @@ export async function getStudentsList(
   } catch (error) {
     console.error('Error al obtener lista de estudiantes:', error);
     return [];
+  }
+}
+
+export async function setStudentBillingPausedAction(studentId: string, paused: boolean) {
+  try {
+    await requireAuth();
+    if (!studentId || typeof paused !== 'boolean') {
+      return { success: false, message: 'Solicitud de cobranza inválida.' };
+    }
+
+    const available = await withTuitionTransaction(async (tx) => {
+      const student = await tx.student.findUnique({
+        where: { id: studentId, archivedAt: null },
+        select: { billingPausedAt: true },
+      });
+      if (!student) return false;
+      if (Boolean(student.billingPausedAt) === paused) return true;
+
+      const now = new Date();
+      const scope = { id: studentId };
+      if (paused) {
+        await issueMonthlyTuitions(tx, now, scope, { throughPreviousMonth: true });
+        await tx.student.update({ where: scope, data: { billingPausedAt: now } });
+        await removeUnpaidCurrentTuition(tx, studentId, now);
+      } else {
+        const previousPeriod = tuitionPeriod(tuitionDay(now), -1);
+        await tx.student.update({
+          where: scope,
+          data: { billingPausedAt: null, billingResumedAt: now, tuitionSyncedThrough: previousPeriod },
+        });
+        await issueMonthlyTuitions(tx, now, scope);
+      }
+
+      return true;
+    });
+
+    if (!available) return { success: false, message: 'El estudiante ya no está disponible.' };
+    revalidatePath('/students');
+    revalidatePath('/');
+    return { success: true, message: paused ? 'Cobranza pausada.' : 'Cobranza reanudada.' };
+  } catch (error) {
+    console.error('Error al cambiar el estado de cobranza:', error);
+    return { success: false, message: 'No se pudo cambiar el estado de cobranza.' };
+  }
+}
+
+export async function archiveStudentAction(studentId: string) {
+  try {
+    await requireAuth();
+    if (!studentId) return { success: false, message: 'ID de estudiante no proporcionado.' };
+
+    const archived = await withTuitionTransaction(async (tx) => {
+      const now = new Date();
+      const result = await tx.student.updateMany({
+        where: { id: studentId, archivedAt: null },
+        data: { archivedAt: now, status: StudentStatus.DROPPED, currentClassId: null },
+      });
+      if (!result.count) return false;
+      await removeUnpaidCurrentTuition(tx, studentId, now);
+      return true;
+    });
+
+    if (!archived) return { success: false, message: 'El estudiante ya no está disponible.' };
+    revalidatePath('/students');
+    revalidatePath('/classes');
+    revalidatePath('/schedule');
+    revalidatePath('/');
+    return { success: true, message: 'Estudiante archivado. Puedes consultar su Kardex en Archivados.' };
+  } catch (error) {
+    console.error('Error al archivar estudiante:', error);
+    return { success: false, message: 'No se pudo archivar al estudiante.' };
   }
 }
 
@@ -902,7 +978,8 @@ export async function updateStudentAction(
     const updatedStudent = await withTuitionTransaction(async (tx) => {
       const now = new Date();
       const scope = { id: studentId };
-      const current = await tx.student.findUniqueOrThrow({ where: scope });
+      const current = await tx.student.findUnique({ where: { ...scope, archivedAt: null } });
+      if (!current) return null;
       const currentClassId = data.currentClassId?.trim() || null;
       const assignmentChanged = current.currentClassId !== currentClassId || current.status !== data.status;
       const oldEnrollmentDay = tuitionDay(current.enrollmentDate);
@@ -965,6 +1042,9 @@ export async function updateStudentAction(
       return student;
     });
 
+    if (!updatedStudent) {
+      return { success: false, message: 'El estudiante ya no está disponible para edición.' };
+    }
     revalidatePath('/students');
     revalidatePath('/classes');
     revalidatePath('/schedule');

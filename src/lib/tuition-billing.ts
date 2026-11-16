@@ -11,6 +11,21 @@ export function withTuitionTransaction<T>(work: (tx: Prisma.TransactionClient) =
   }, { maxWait: 5_000, timeout: 15_000 });
 }
 
+export async function removeUnpaidCurrentTuition(
+  tx: Prisma.TransactionClient, studentId: string, now: Date,
+) {
+  const today = tuitionDay(now);
+  await tx.tuitionFee.deleteMany({
+    where: {
+      studentId,
+      year: today.getUTCFullYear(),
+      month: today.getUTCMonth() + 1,
+      status: { in: [TuitionFeeStatus.PENDING, TuitionFeeStatus.OVERDUE] },
+      payments: { none: {} },
+    },
+  });
+}
+
 export async function issueMonthlyTuitions(
   tx: Prisma.TransactionClient,
   now: Date,
@@ -42,6 +57,8 @@ export async function issueMonthlyTuitions(
         scope,
         {
           status: StudentStatus.ACTIVE,
+          archivedAt: null,
+          billingPausedAt: null,
           currentClass: { status: ClassStatus.ACTIVE },
           OR: needsSync,
         },
@@ -53,6 +70,7 @@ export async function issueMonthlyTuitions(
       enrollmentDate: true,
       monthlyFee: true,
       tuitionSyncedThrough: true,
+      billingResumedAt: true,
       tuitionFees: { select: { id: true, month: true, year: true, dueDate: true, status: true } },
     },
   });
@@ -86,7 +104,8 @@ export async function issueMonthlyTuitions(
       const month = period.getUTCMonth() + 1;
       if (issuedPeriods.has(tuitionPeriodKey({ year, month }))) continue;
       const dueDate = tuitionDueDate(enrollmentDay, period);
-      if (activeSince && dueDate < activeSince) continue;
+      if ((activeSince && dueDate < activeSince) ||
+          (student.billingResumedAt && dueDate < student.billingResumedAt)) continue;
       newFees.push({
         studentId: student.id,
         classId: student.currentClassId,
