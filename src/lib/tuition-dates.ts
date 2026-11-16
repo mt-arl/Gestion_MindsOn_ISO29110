@@ -23,6 +23,13 @@ export function tuitionDayStart(day: Date): Date {
   return new Date(day.getTime() + ECUADOR_OFFSET_MS);
 }
 
+export function financialMonthRange(year: number, month: number, months = 1) {
+  return {
+    gte: tuitionDayStart(new Date(Date.UTC(year, month - 1, 1))),
+    lt: tuitionDayStart(new Date(Date.UTC(year, month - 1 + months, 1))),
+  };
+}
+
 export function tuitionDateInput(date: Date): string {
   return tuitionDay(date).toISOString().slice(0, 10);
 }

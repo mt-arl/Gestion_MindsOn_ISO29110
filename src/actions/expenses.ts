@@ -6,6 +6,8 @@ import { ExpenseType, ExpenseCategory, PaymentMethod } from '@prisma/client';
 import { getMonthName } from '@/lib/utils';
 import { EXPENSE_CATEGORY_LABELS } from '@/lib/expense-constants';
 import { requireAuth } from '@/lib/require-auth';
+import { financialMonthRange, tuitionDay } from '@/lib/tuition-dates';
+import { priorTuitionPaymentsWhere } from '@/lib/tuition-payments';
 
 export type SerializedExpense = {
   id: string;
@@ -46,10 +48,12 @@ export type CategoryExpenseBreakdown = {
 };
 
 export type MonthlyFinancialBalanceResponse = {
+  error?: true;
   year: number;
   month: number;
   monthName: string;
   summary: {
+    priorPeriodIncome: number;
     totalIncome: number;            // Ingresos Reales Cobrados (Payments)
     totalExpenses: number;          // Egresos Totales
     netBalance: number;             // totalIncome - totalExpenses
@@ -77,17 +81,13 @@ async function syncMonthlyRecurringExpenses(targetYear: number, targetMonth: num
 
     if (activeTemplates.length === 0) return;
 
-    const startOfMonth = new Date(targetYear, targetMonth - 1, 1, 0, 0, 0, 0);
-    const endOfMonth = new Date(targetYear, targetMonth, 0, 23, 59, 59, 999);
-    const daysInMonth = new Date(targetYear, targetMonth, 0).getDate();
+    const monthRange = financialMonthRange(targetYear, targetMonth);
+    const daysInMonth = new Date(Date.UTC(targetYear, targetMonth, 0)).getUTCDate();
 
     // Obtener qué plantillas ya tienen un Expense generado en este mes
     const existingExpenses = await prisma.expense.findMany({
       where: {
-        expenseDate: {
-          gte: startOfMonth,
-          lte: endOfMonth,
-        },
+        expenseDate: monthRange,
         recurringExpenseId: {
           not: null,
         },
@@ -104,7 +104,7 @@ async function syncMonthlyRecurringExpenses(targetYear: number, targetMonth: num
       await Promise.all(
         templatesToGenerate.map((template) => {
           const safeDay = Math.min(Math.max(1, template.dayOfMonth), daysInMonth);
-          const expenseDate = new Date(targetYear, targetMonth - 1, safeDay, 12, 0, 0, 0);
+          const expenseDate = new Date(Date.UTC(targetYear, targetMonth - 1, safeDay, 12));
 
           return prisma.expense.create({
             data: {
@@ -136,43 +136,37 @@ export async function getMonthlyFinancialBalanceAction(
 ): Promise<MonthlyFinancialBalanceResponse> {
   try {
     await requireAuth();
-    const now = new Date();
-    const targetYear = typeof year === 'number' && year >= 2020 && year <= 2100 ? year : now.getFullYear();
-    const targetMonth = typeof month === 'number' && month >= 1 && month <= 12 ? month : now.getMonth() + 1;
+    const cutoff = new Date();
+    const now = tuitionDay(cutoff);
+    const targetYear = typeof year === 'number' && year >= 2020 && year <= 2100 ? year : now.getUTCFullYear();
+    const targetMonth = typeof month === 'number' && month >= 1 && month <= 12 ? month : now.getUTCMonth() + 1;
 
-    const startOfMonth = new Date(targetYear, targetMonth - 1, 1, 0, 0, 0, 0);
-    const endOfMonth = new Date(targetYear, targetMonth, 0, 23, 59, 59, 999);
+    const monthRange = financialMonthRange(targetYear, targetMonth);
 
     // 0. Sincronización automática de gastos recurrentes programados para este mes
-    await syncMonthlyRecurringExpenses(targetYear, targetMonth);
+    if (now.getUTCFullYear() === targetYear && now.getUTCMonth() + 1 === targetMonth) {
+      await syncMonthlyRecurringExpenses(targetYear, targetMonth);
+    }
 
-    // 1. Ingresos reales: Pagos cobrados en este mes calendario
-    const payments = await prisma.payment.findMany({
-      where: {
-        paymentDate: {
-          gte: startOfMonth,
-          lte: endOfMonth,
-        },
-      },
-      select: {
-        amountPaid: true,
-      },
-    });
+    // 1. Pagos registrados hasta hoy para las cuotas del periodo.
+    const period = { year: targetYear, month: targetMonth };
+    const [payments, priorPayments, rawExpenses] = await Promise.all([
+      prisma.payment.findMany({
+        where: { tuitionFee: period, paymentDate: { lte: cutoff } },
+        select: { amountPaid: true },
+      }),
+      prisma.payment.aggregate({
+        where: priorTuitionPaymentsWhere(period, cutoff),
+        _sum: { amountPaid: true },
+      }),
+      prisma.expense.findMany({
+        where: { expenseDate: monthRange },
+        orderBy: { expenseDate: 'desc' },
+      }),
+    ]);
 
-    const totalIncome = payments.reduce((sum, p) => sum + Number(p.amountPaid), 0);
-
-    // 2. Egresos registrados con fecha de desembolso en este mes
-    const rawExpenses = await prisma.expense.findMany({
-      where: {
-        expenseDate: {
-          gte: startOfMonth,
-          lte: endOfMonth,
-        },
-      },
-      orderBy: {
-        expenseDate: 'desc',
-      },
-    });
+    const totalIncome = payments.reduce((cents, p) => cents + Math.round(Number(p.amountPaid) * 100), 0) / 100;
+    const priorPeriodIncome = Number(priorPayments._sum.amountPaid ?? 0);
 
     let totalExpenses = 0;
     let fixedExpensesSubtotal = 0;
@@ -220,7 +214,7 @@ export async function getMonthlyFinancialBalanceAction(
 
     const operatingMarginPercentage = totalIncome > 0 
       ? Math.round(((netBalance / totalIncome) * 100) * 10) / 10 
-      : (totalExpenses > 0 ? -100 : 0);
+      : 0;
 
     const fixedPercentageOfIncome = totalIncome > 0
       ? Math.round(((fixedExpensesSubtotal / totalIncome) * 100) * 10) / 10
@@ -231,7 +225,7 @@ export async function getMonthlyFinancialBalanceAction(
       : 0;
 
     const freeMarginPercentageOfIncome = totalIncome > 0
-      ? Math.max(0, Math.round((100 - fixedPercentageOfIncome - variablePercentageOfIncome) * 10) / 10)
+      ? Math.max(0, operatingMarginPercentage)
       : 0;
 
     // Desglose por categoría ordenado por mayor gasto
@@ -254,6 +248,7 @@ export async function getMonthlyFinancialBalanceAction(
       month: targetMonth,
       monthName: getMonthName(targetMonth),
       summary: {
+        priorPeriodIncome,
         totalIncome: Math.round(totalIncome * 100) / 100,
         totalExpenses: Math.round(totalExpenses * 100) / 100,
         netBalance,
@@ -270,12 +265,14 @@ export async function getMonthlyFinancialBalanceAction(
     };
   } catch (error) {
     console.error('Error al obtener balance financiero mensual:', error);
-    const now = new Date();
+    const now = tuitionDay(new Date());
     return {
-      year: year || now.getFullYear(),
-      month: month || now.getMonth() + 1,
-      monthName: getMonthName(month || now.getMonth() + 1),
+      error: true,
+      year: year || now.getUTCFullYear(),
+      month: month || now.getUTCMonth() + 1,
+      monthName: getMonthName(month || now.getUTCMonth() + 1),
       summary: {
+        priorPeriodIncome: 0,
         totalIncome: 0,
         totalExpenses: 0,
         netBalance: 0,
@@ -339,7 +336,7 @@ export async function createExpenseAction(data: {
         const y = parseInt(parts[0], 10);
         const m = parseInt(parts[1], 10);
         const d = parseInt(parts[2], 10);
-        parsedDate = new Date(y, m - 1, d, 12, 0, 0);
+        parsedDate = new Date(Date.UTC(y, m - 1, d, 12));
       }
     }
 
@@ -413,7 +410,7 @@ export async function updateExpenseAction(
         const y = parseInt(parts[0], 10);
         const m = parseInt(parts[1], 10);
         const d = parseInt(parts[2], 10);
-        parsedDate = new Date(y, m - 1, d, 12, 0, 0);
+        parsedDate = new Date(Date.UTC(y, m - 1, d, 12));
       }
     }
 
@@ -547,8 +544,8 @@ export async function createRecurringExpenseAction(data: {
 
     // Si se crea activa, generar inmediatamente el gasto para el mes en curso si no existe
     if (created.isActive) {
-      const now = new Date();
-      await syncMonthlyRecurringExpenses(now.getFullYear(), now.getMonth() + 1);
+      const now = tuitionDay(new Date());
+      await syncMonthlyRecurringExpenses(now.getUTCFullYear(), now.getUTCMonth() + 1);
     }
 
     revalidatePath('/');
@@ -606,16 +603,15 @@ export async function updateRecurringExpenseAction(
 
     // Sincronizar el gasto generado del mes en curso si está habilitado
     if (data.syncCurrentMonth !== false) {
-      const now = new Date();
-      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-      const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-      const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+      const now = tuitionDay(new Date());
+      const monthRange = financialMonthRange(now.getUTCFullYear(), now.getUTCMonth() + 1);
+      const daysInMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).getUTCDate();
       const safeDay = Math.min(dayNum, daysInMonth);
 
       await prisma.expense.updateMany({
         where: {
           recurringExpenseId: id,
-          expenseDate: { gte: startOfMonth, lte: endOfMonth },
+          expenseDate: monthRange,
         },
         data: {
           title: updated.title,
@@ -623,7 +619,7 @@ export async function updateRecurringExpenseAction(
           category: updated.category,
           paymentMethod: updated.paymentMethod,
           supplier: updated.supplier,
-          expenseDate: new Date(now.getFullYear(), now.getMonth(), safeDay, 12, 0, 0, 0),
+          expenseDate: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), safeDay, 12)),
         },
       });
     }
@@ -653,8 +649,8 @@ export async function toggleRecurringExpenseAction(
     });
 
     if (isActive) {
-      const now = new Date();
-      await syncMonthlyRecurringExpenses(now.getFullYear(), now.getMonth() + 1);
+      const now = tuitionDay(new Date());
+      await syncMonthlyRecurringExpenses(now.getUTCFullYear(), now.getUTCMonth() + 1);
     }
 
     revalidatePath('/');

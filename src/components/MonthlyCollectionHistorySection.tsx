@@ -31,48 +31,56 @@ import {
   getMonthlyCollectionHistoryAction,
   getAnnualCashflowSummaryAction
 } from '@/actions/finance';
-import { formatCurrency, formatDate, formatDateTime, getMonthName } from '@/lib/utils';
+import { formatCurrency, formatDateTime, getMonthName } from '@/lib/utils';
+import { TUITION_TIME_ZONE, tuitionDay, tuitionPeriodKey, type TuitionPeriod } from '@/lib/tuition-dates';
 import { PaymentReceiptModal } from './PaymentReceiptModal';
 
 interface MonthlyCollectionHistorySectionProps {
   initialMonthlyData: MonthlyCollectionHistoryResponse;
   initialAnnualData: AnnualCashflowSummaryResponse;
-  onMonthChange?: (year: number, month: number) => void;
+  initialPeriod?: TuitionPeriod;
 }
 
 export function MonthlyCollectionHistorySection({
   initialMonthlyData,
   initialAnnualData,
-  onMonthChange,
+  initialPeriod,
 }: MonthlyCollectionHistorySectionProps) {
   const [isPending, startTransition] = useTransition();
   const [monthlyData, setMonthlyData] = useState<MonthlyCollectionHistoryResponse>(initialMonthlyData);
   const [annualData, setAnnualData] = useState<AnnualCashflowSummaryResponse>(initialAnnualData);
 
-  const [selectedYear, setSelectedYear] = useState<number>(initialMonthlyData.year);
-  const [selectedMonth, setSelectedMonth] = useState<number>(initialMonthlyData.month);
+  const [selectedYear, setSelectedYear] = useState(initialPeriod?.year ?? initialMonthlyData.year);
+  const [selectedMonth, setSelectedMonth] = useState(initialPeriod?.month ?? initialMonthlyData.month);
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [methodFilter, setMethodFilter] = useState<string>('ALL');
   const [selectedReceiptPaymentId, setSelectedReceiptPaymentId] = useState<string | null>(null);
 
-  // Sincronización reactiva de datos al cambiar selectedYear o selectedMonth
-  useEffect(() => {
-    startTransition(async () => {
-      const [mRes, aRes] = await Promise.all([
-        getMonthlyCollectionHistoryAction(selectedYear, selectedMonth),
-        getAnnualCashflowSummaryAction(selectedYear),
-      ]);
-      setMonthlyData(mRes);
-      setAnnualData(aRes);
-    });
+  const [loadError, setLoadError] = useState(false);
 
-    if (onMonthChange) {
-      onMonthChange(selectedYear, selectedMonth);
-    }
+  useEffect(() => {
+    let cancelled = false;
+    setLoadError(false);
+    startTransition(async () => {
+      try {
+        const [monthly, annual] = await Promise.all([
+          getMonthlyCollectionHistoryAction(selectedYear, selectedMonth),
+          getAnnualCashflowSummaryAction(selectedYear),
+        ]);
+        if (!cancelled) {
+          setMonthlyData(monthly);
+          setAnnualData(annual);
+        }
+      } catch {
+        if (!cancelled) setLoadError(true);
+      }
+    });
+    return () => { cancelled = true; };
   }, [selectedYear, selectedMonth]);
 
   // Selección de mes y scroll suave hacia el cuadre superior
   const handleSelectMonth = (monthNumber: number) => {
+    setSelectedYear(annualData.year);
     setSelectedMonth(monthNumber);
 
     setTimeout(() => {
@@ -103,21 +111,15 @@ export function MonthlyCollectionHistorySection({
   };
 
   const handleGoToCurrentMonth = () => {
-    const now = new Date();
-    setSelectedYear(now.getFullYear());
-    setSelectedMonth(now.getMonth() + 1);
+    const now = tuitionDay(new Date());
+    setSelectedYear(now.getUTCFullYear());
+    setSelectedMonth(now.getUTCMonth() + 1);
   };
 
   // Filtrado de transacciones
   const filteredTransactions = useMemo(() => {
     return monthlyData.transactions.filter((tx) => {
-      // Filtro de método
-      if (methodFilter !== 'ALL') {
-        const lowerMethod = tx.paymentMethod.toLowerCase();
-        if (methodFilter === 'TRANSFER' && !lowerMethod.includes('transferencia') && !lowerMethod.includes('banco') && !lowerMethod.includes('qr')) return false;
-        if (methodFilter === 'CASH' && !lowerMethod.includes('efectivo') && !lowerMethod.includes('cash')) return false;
-        if (methodFilter === 'CARD' && !lowerMethod.includes('tarjeta') && !lowerMethod.includes('depósito') && !lowerMethod.includes('deposito')) return false;
-      }
+      if (methodFilter !== 'ALL' && tx.methodGroup !== methodFilter) return false;
 
       // Filtro de texto
       if (!searchTerm.trim()) return true;
@@ -140,10 +142,35 @@ export function MonthlyCollectionHistorySection({
     });
   }, [monthlyData.transactions, methodFilter, searchTerm]);
 
-  const { metrics } = monthlyData;
+  const priorPayments = useMemo(() => {
+    const groups = new Map<number, {
+      label: string;
+      cents: number;
+      transactions: MonthlyPaymentTransaction[];
+    }>();
+    let totalCents = 0;
+    for (const payment of monthlyData.priorPeriodTransactions) {
+      const key = tuitionPeriodKey({ year: payment.feeYear, month: payment.feeMonth });
+      let group = groups.get(key);
+      if (!group) {
+        group = { label: `${payment.feeMonthName} ${payment.feeYear}`, cents: 0, transactions: [] };
+        groups.set(key, group);
+      }
+      const cents = Math.round(payment.amountPaid * 100);
+      group.cents += cents;
+      group.transactions.push(payment);
+      totalCents += cents;
+    }
+    return { groups: Array.from(groups).sort(([a], [b]) => b - a), total: totalCents / 100 };
+  }, [monthlyData.priorPeriodTransactions]);
 
-  const now = new Date();
-  const isCurrentActiveMonth = selectedMonth === (now.getMonth() + 1) && selectedYear === now.getFullYear();
+  const { metrics } = monthlyData;
+  const failed = loadError || monthlyData.error || annualData.error;
+  const matchesPeriod = monthlyData.month === selectedMonth && monthlyData.year === selectedYear
+    && annualData.year === selectedYear;
+
+  const now = tuitionDay(new Date());
+  const isCurrentActiveMonth = selectedMonth === (now.getUTCMonth() + 1) && selectedYear === now.getUTCFullYear();
 
   return (
     <div className="space-y-6">
@@ -211,7 +238,7 @@ export function MonthlyCollectionHistorySection({
                 className="inline-flex items-center gap-1.5 rounded-xl border border-indigo-200 bg-indigo-50/80 px-3.5 py-2 text-xs font-bold text-indigo-700 hover:bg-indigo-100 active:scale-95 transition-all"
               >
                 <Calendar className="h-3.5 w-3.5 text-indigo-600" />
-                Ir al Mes Actual ({getMonthName(now.getMonth() + 1)})
+                Ir al Mes Actual ({getMonthName(now.getUTCMonth() + 1)})
               </button>
             )}
 
@@ -224,6 +251,8 @@ export function MonthlyCollectionHistorySection({
           </div>
         </div>
 
+        {failed && <p role="alert" className="text-sm text-rose-700">No se pudo cargar el cuadre del periodo.</p>}
+        {matchesPeriod && !failed && <>
         {/* 2. Tarjetas de Cuadre de Caja del Mes */}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           
@@ -231,7 +260,7 @@ export function MonthlyCollectionHistorySection({
           <div className="relative overflow-hidden rounded-2xl bg-white p-5 shadow-[0_4px_25px_-5px_rgba(0,0,0,0.03)] border border-emerald-100">
             <div className="flex items-center justify-between">
               <span className="text-xs font-black uppercase tracking-wider text-emerald-800">
-                Total Ingresado en Caja
+                Total recaudado de las cuotas
               </span>
               <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-100/80 text-emerald-700 shadow-sm shadow-emerald-500/10">
                 <DollarSign className="h-5 w-5" />
@@ -243,7 +272,7 @@ export function MonthlyCollectionHistorySection({
                 {formatCurrency(metrics.totalCollected)}
               </div>
               <p className="text-xs text-slate-500 font-medium mt-0.5">
-                Efectivo real percibido en {monthlyData.monthName} {monthlyData.year}
+                Cobrado hasta hoy de las cuotas de {monthlyData.monthName} {monthlyData.year}
               </p>
             </div>
 
@@ -269,6 +298,12 @@ export function MonthlyCollectionHistorySection({
                   <strong className="text-slate-900 font-mono">{formatCurrency(metrics.byMethod.cardOrDeposit)}</strong>
                 </div>
               )}
+              {metrics.byMethod.other > 0 && (
+                <div className="flex items-center justify-between text-slate-600 font-medium">
+                  <span>Otros o sin especificar</span>
+                  <strong>{formatCurrency(metrics.byMethod.other)}</strong>
+                </div>
+              )}
             </div>
           </div>
 
@@ -288,23 +323,18 @@ export function MonthlyCollectionHistorySection({
                 {metrics.paymentCount}
               </div>
               <p className="text-xs text-slate-500 font-medium mt-0.5">
-                Comprobantes emitidos en el periodo
+                Pagos de las cuotas del periodo
               </p>
             </div>
 
-            <div className="mt-4 pt-3 border-t border-slate-100">
-              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-600">
-                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-                100% de recibos con voucher digital
-              </span>
-            </div>
+
           </div>
 
           {/* Efectividad de Cobro */}
           <div className="relative overflow-hidden rounded-2xl bg-white p-5 shadow-[0_4px_25px_-5px_rgba(0,0,0,0.03)] border border-indigo-100">
             <div className="flex items-center justify-between">
               <span className="text-xs font-black uppercase tracking-wider text-indigo-800">
-                Tasa de Recuperación
+                Tasa de cobro de las cuotas
               </span>
               <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-100/80 text-indigo-700 shadow-sm shadow-indigo-500/10">
                 <TrendingUp className="h-5 w-5" />
@@ -316,7 +346,7 @@ export function MonthlyCollectionHistorySection({
                 {metrics.recoveryRate}%
               </div>
               <p className="text-xs text-slate-500 font-medium mt-0.5">
-                Cobrado vs. Proyectado ({formatCurrency(metrics.projectedMonth)})
+                {formatCurrency(metrics.paidMonth)} pagados de {formatCurrency(metrics.projectedMonth)} emitidos
               </p>
             </div>
 
@@ -347,17 +377,75 @@ export function MonthlyCollectionHistorySection({
                 {formatCurrency(metrics.overdueMonth)}
               </div>
               <p className="text-xs text-slate-500 font-medium mt-0.5">
-                Por recaudar en {monthlyData.monthName}
+                Saldo de las cuotas de {monthlyData.monthName}
               </p>
             </div>
 
             <div className="mt-4 pt-3 border-t border-slate-100">
               <span className="text-[11px] font-bold text-slate-500">
-                Proyección total: <strong className="text-slate-800 font-mono">{formatCurrency(metrics.projectedMonth)}</strong>
+                Cuotas emitidas <strong className="text-slate-800 font-mono">{formatCurrency(metrics.projectedMonth)}</strong>
               </span>
             </div>
           </div>
         </div>
+
+        <section aria-labelledby="prior-payments-title" className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 id="prior-payments-title" className="text-lg font-black text-slate-900">
+                Cobros de meses anteriores
+              </h2>
+              <p className="mt-1 text-xs text-slate-500">
+                Pagos recibidos en {monthlyData.monthName} {monthlyData.year} por cuotas de periodos anteriores.
+              </p>
+            </div>
+            <strong className="text-xl text-emerald-700">{formatCurrency(priorPayments.total)}</strong>
+          </div>
+
+          {priorPayments.groups.length === 0 && (
+            <p className="text-sm text-slate-500">No hay cobros de cuotas anteriores registrados en este mes.</p>
+          )}
+
+          {priorPayments.groups.map(([key, group]) => (
+            <details key={key} className="rounded-xl border border-slate-200">
+              <summary className="cursor-pointer rounded-xl bg-slate-50 px-4 py-3 text-sm font-bold text-slate-800">
+                {group.label} · {group.transactions.length} {group.transactions.length === 1 ? 'pago' : 'pagos'} · {formatCurrency(group.cents / 100)}
+              </summary>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs text-slate-700">
+                  <thead className="border-b border-slate-100 text-slate-500">
+                    <tr>
+                      <th scope="col" className="px-4 py-3">Estudiante y curso</th>
+                      <th scope="col" className="px-4 py-3">Fecha de pago</th>
+                      <th scope="col" className="px-4 py-3">Método</th>
+                      <th scope="col" className="px-4 py-3">Monto</th>
+                      <th scope="col" className="px-4 py-3">Recibo</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {group.transactions.map((payment) => (
+                      <tr key={payment.id}>
+                        <td className="px-4 py-3">
+                          <strong>{payment.student.firstName} {payment.student.lastName}</strong>
+                          <div className="text-slate-500">{payment.class.name} ({payment.class.code})</div>
+                        </td>
+                        <td className="px-4 py-3">{formatDateTime(payment.paymentDate, TUITION_TIME_ZONE)}</td>
+                        <td className="px-4 py-3">{payment.paymentMethod}</td>
+                        <td className="whitespace-nowrap px-4 py-3 font-bold">{formatCurrency(payment.amountPaid)}</td>
+                        <td className="px-4 py-3">
+                          <button type="button" className="font-bold text-indigo-700 underline"
+                            onClick={() => setSelectedReceiptPaymentId(payment.paymentId)}>
+                            {payment.receiptNumber}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          ))}
+        </section>
 
         {/* 3. Libro Diario de Pagos del Mes (Tabla de Transacciones) */}
         <div className="space-y-4">
@@ -368,38 +456,33 @@ export function MonthlyCollectionHistorySection({
                 Libro Diario de Pagos — {monthlyData.monthName} {monthlyData.year}
               </h2>
               <p className="text-xs text-slate-500 font-medium mt-0.5">
-                Registro cronológico correlativo de transacciones recibidas
+                Pagos aplicados a las cuotas del periodo
               </p>
             </div>
 
             {/* Filtros de la Tabla */}
             <div className="flex items-center gap-2.5 flex-wrap">
               {/* Método de pago */}
-              <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-slate-200/80">
-                <button
-                  onClick={() => setMethodFilter('ALL')}
-                  className={`rounded-lg px-2.5 py-1 text-xs font-bold transition-all ${
-                    methodFilter === 'ALL' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  Todos
-                </button>
-                <button
-                  onClick={() => setMethodFilter('TRANSFER')}
-                  className={`rounded-lg px-2.5 py-1 text-xs font-bold transition-all ${
-                    methodFilter === 'TRANSFER' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  Bancos
-                </button>
-                <button
-                  onClick={() => setMethodFilter('CASH')}
-                  className={`rounded-lg px-2.5 py-1 text-xs font-bold transition-all ${
-                    methodFilter === 'CASH' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  Efectivo
-                </button>
+              <div className="flex flex-wrap items-center gap-1 bg-white p-1 rounded-xl border border-slate-200/80">
+                {[
+                  ['ALL', 'Todos'],
+                  ['transfer', 'Bancos / QR'],
+                  ['cash', 'Efectivo'],
+                  ['cardOrDeposit', 'Tarjeta / Depósito'],
+                  ['other', 'Otros'],
+                ].map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    aria-pressed={methodFilter === value}
+                    onClick={() => setMethodFilter(value)}
+                    className={`rounded-lg px-2.5 py-1 text-xs font-bold transition-all ${
+                      methodFilter === value ? 'bg-slate-900 text-white' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
               </div>
 
               {/* Input de Búsqueda */}
@@ -460,7 +543,7 @@ export function MonthlyCollectionHistorySection({
                           <td className="px-5 py-4.5">
                             <div className="space-y-0.5">
                               <span className="font-bold text-slate-900 text-xs">
-                                {formatDateTime(tx.paymentDate)}
+                                {formatDateTime(tx.paymentDate, TUITION_TIME_ZONE)}
                               </span>
                               <div className="text-[10px] text-slate-400">
                                 Reg: {tx.registeredBy}
@@ -544,15 +627,15 @@ export function MonthlyCollectionHistorySection({
             </div>
           </div>
         </div>
+        </>}
       </div>
 
-      {/* 4. Tabla Resumen Anual de Cierres (Enero a Diciembre) */}
-      <div className="space-y-4 pt-4 border-t border-slate-200/70">
+      {matchesPeriod && !failed && <div className="space-y-4 pt-4 border-t border-slate-200/70">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
           <div>
             <h2 className="text-lg sm:text-xl font-black tracking-tight text-slate-900 flex items-center gap-2">
               <FileSpreadsheet className="h-5 w-5 text-indigo-600" />
-              Resumen Anual de Flujo de Caja — {annualData.year}
+              Resumen anual por periodo de cuota — {annualData.year}
             </h2>
             <p className="text-xs text-slate-500 font-medium mt-0.5">
               Consolidado de los 12 meses. Haz clic en cualquier mes para abrir su cuadre detallado.
@@ -560,10 +643,10 @@ export function MonthlyCollectionHistorySection({
           </div>
 
           <div className="flex items-center gap-3 text-xs font-bold bg-white px-4 py-2 rounded-2xl border border-slate-200/80 shadow-xs">
-            <span className="text-slate-500">Recaudación Anual:</span>
+            <span className="text-slate-500">Cuotas cobradas del año</span>
             <span className="font-black text-emerald-700 text-sm font-mono">{formatCurrency(annualData.annualTotalCollected)}</span>
             <span className="text-slate-300">|</span>
-            <span className="text-slate-500">Proyección:</span>
+            <span className="text-slate-500">Cuotas emitidas</span>
             <span className="font-bold text-slate-800 font-mono">{formatCurrency(annualData.annualTotalProjected)}</span>
           </div>
         </div>
@@ -575,18 +658,18 @@ export function MonthlyCollectionHistorySection({
               <thead className="bg-slate-50/70 border-b border-slate-200/80 text-[10px] uppercase font-black text-slate-400 tracking-wider">
                 <tr>
                   <th scope="col" className="px-5 py-4">Mes</th>
-                  <th scope="col" className="px-5 py-4">Total Recaudado</th>
-                  <th scope="col" className="px-5 py-4">Proyectado</th>
+                  <th scope="col" className="px-5 py-4">Recaudado de las cuotas</th>
+                  <th scope="col" className="px-5 py-4">Cuotas emitidas</th>
                   <th scope="col" className="px-5 py-4">Saldo Pendiente</th>
                   <th scope="col" className="px-5 py-4">Transacciones</th>
-                  <th scope="col" className="px-5 py-4">Efectividad</th>
+                  <th scope="col" className="px-5 py-4">Tasa de cobro de cuotas</th>
                   <th scope="col" className="px-5 py-4 text-right">Acción</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 font-medium">
                 {annualData.months.map((m) => {
                   const isSelected = m.month === selectedMonth && annualData.year === selectedYear;
-                  const isCurrentMonth = m.month === (now.getMonth() + 1) && annualData.year === now.getFullYear();
+                  const isCurrentMonth = m.month === (now.getUTCMonth() + 1) && annualData.year === now.getUTCFullYear();
 
                   return (
                     <tr
@@ -681,7 +764,7 @@ export function MonthlyCollectionHistorySection({
             </table>
           </div>
         </div>
-      </div>
+      </div>}
 
       {/* Modal de Comprobante / Recibo */}
       {selectedReceiptPaymentId && (

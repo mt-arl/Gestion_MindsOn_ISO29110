@@ -21,7 +21,7 @@ import {
   Sparkles
 } from 'lucide-react';
 import { getPaymentReceiptDataAction, PaymentReceiptData } from '@/actions/finance';
-import { formatCurrency, formatDate } from '@/lib/utils';
+import { formatCurrency, formatTuitionDate } from '@/lib/utils';
 import { buildWhatsAppUrl } from '@/lib/ecuador-validators';
 
 interface PaymentReceiptModalProps {
@@ -71,7 +71,7 @@ export function PaymentReceiptModal({
 `¡Hola ${studentName}! Te confirmamos la recepción de tu pago en MindsOn Instituto de Inglés.
 
 🧾 Comprobante: ${receiptData.receiptNumber}${invoiceLine}
-📅 Fecha: ${formatDate(receiptData.paymentDate)}
+📅 Fecha: ${formatTuitionDate(receiptData.paymentDate)}
 📚 Curso: ${receiptData.class.name} (${receiptData.class.code})
 💵 Monto Pagado: USD $${receiptData.amountPaid.toFixed(2)}
 💳 Método: ${receiptData.paymentMethod}
@@ -227,7 +227,7 @@ export function PaymentReceiptModal({
                   </p>
                   <p className="text-[11px] text-slate-500 flex items-center justify-center sm:justify-end gap-1 font-medium">
                     <Clock className="h-3 w-3 text-slate-400" />
-                    {formatDate(receiptData.paymentDate)}
+                    {formatTuitionDate(receiptData.paymentDate)}
                   </p>
                 </div>
               </div>

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useTransition, useMemo } from 'react';
+import React, { useState, useEffect, useTransition, useMemo, useRef } from 'react';
 import { 
   TrendingUp, 
   DollarSign, 
@@ -41,23 +41,24 @@ import {
 } from '@/actions/expenses';
 import { EXPENSE_CATEGORY_LABELS, PAYMENT_METHOD_LABELS } from '@/lib/expense-constants';
 import { ExpenseType, ExpenseCategory, PaymentMethod } from '@prisma/client';
-import { formatCurrency, formatDate, getMonthName } from '@/lib/utils';
+import { formatCurrency, formatTuitionDate, getMonthName } from '@/lib/utils';
+import { tuitionDay } from '@/lib/tuition-dates';
 import { CreateExpenseModal } from './CreateExpenseModal';
 import { EditExpenseModal } from './EditExpenseModal';
 import { RecurringExpensesModal } from './RecurringExpensesModal';
 
 interface FinancialBalanceSectionProps {
   initialData?: MonthlyFinancialBalanceResponse;
-  onMonthChange?: (year: number, month: number) => void;
+  onViewPayments?: (year: number, month: number) => void;
 }
 
 export function FinancialBalanceSection({
   initialData,
-  onMonthChange,
+  onViewPayments,
 }: FinancialBalanceSectionProps) {
-  const now = new Date();
-  const currentCalendarYear = now.getFullYear();
-  const currentCalendarMonth = now.getMonth() + 1;
+  const now = tuitionDay(new Date());
+  const currentCalendarYear = now.getUTCFullYear();
+  const currentCalendarMonth = now.getUTCMonth() + 1;
 
   const [isPending, startTransition] = useTransition();
   const [data, setData] = useState<MonthlyFinancialBalanceResponse | null>(initialData || null);
@@ -76,13 +77,17 @@ export function FinancialBalanceSection({
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [feedbackMessage, setFeedbackMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // Carga / refresco de datos
+  const latestRequest = useRef(0);
+  const [loadError, setLoadError] = useState(false);
   const loadBalance = (year: number, month: number) => {
+    const request = ++latestRequest.current;
+    setLoadError(false);
     startTransition(async () => {
-      const res = await getMonthlyFinancialBalanceAction(year, month);
-      setData(res);
-      if (onMonthChange) {
-        onMonthChange(year, month);
+      try {
+        const result = await getMonthlyFinancialBalanceAction(year, month);
+        if (request === latestRequest.current) setData(result);
+      } catch {
+        if (request === latestRequest.current) setLoadError(true);
       }
     });
   };
@@ -185,6 +190,7 @@ export function FinancialBalanceSection({
   }, [filteredExpenses]);
 
   const summary = data?.summary || {
+    priorPeriodIncome: 0,
     totalIncome: 0,
     totalExpenses: 0,
     netBalance: 0,
@@ -197,6 +203,7 @@ export function FinancialBalanceSection({
     isSurplus: true,
   };
 
+  const matchesPeriod = data?.year === selectedYear && data?.month === selectedMonth;
   const isCurrentMonthSelected = selectedYear === currentCalendarYear && selectedMonth === currentCalendarMonth;
 
   return (
@@ -300,6 +307,10 @@ export function FinancialBalanceSection({
         </div>
       )}
 
+      {(loadError || data?.error) && (
+        <p role="alert" className="text-sm text-rose-700">No se pudo cargar el balance del periodo.</p>
+      )}
+      {matchesPeriod && !loadError && !data?.error && <>
       {/* 2. Tarjetas de Métricas Clave (KPIs) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Card 1: Ingresos Reales Cobrados */}
@@ -318,9 +329,17 @@ export function FinancialBalanceSection({
             </div>
           </div>
           <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
-            <span>Pagos reales de colegiaturas</span>
-            <span className="font-semibold text-emerald-600">100% Recaudo</span>
+            <span>Cobrado de las cuotas del mes</span>
+            {onViewPayments && data && (
+              <button type="button" disabled={isPending} className="font-bold text-indigo-700 hover:underline"
+                onClick={() => onViewPayments(data.year, data.month)}>
+                Ver libro diario
+              </button>
+            )}
           </div>
+          <p className="mt-2 text-[11px] text-slate-600">
+            Cobros de meses anteriores <strong>{formatCurrency(summary.priorPeriodIncome)}</strong>
+          </p>
         </div>
 
         {/* Card 2: Egresos Operativos Totales */}
@@ -400,7 +419,7 @@ export function FinancialBalanceSection({
                   ? 'text-indigo-700' 
                   : 'text-rose-600'
               }`}>
-                {summary.operatingMarginPercentage}%
+                {summary.totalIncome > 0 ? `${summary.operatingMarginPercentage}%` : '—'}
               </h3>
             </div>
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 border border-indigo-100">
@@ -410,7 +429,7 @@ export function FinancialBalanceSection({
           <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
             <span>Retención del ingreso</span>
             <span className="font-semibold text-slate-700">
-              {summary.operatingMarginPercentage >= 40 ? 'Óptimo' : summary.operatingMarginPercentage > 0 ? 'Saludable' : 'Alerta'}
+              {summary.totalIncome === 0 ? 'Sin ingresos' : summary.operatingMarginPercentage >= 40 ? 'Óptimo' : summary.operatingMarginPercentage > 0 ? 'Saludable' : 'Alerta'}
             </span>
           </div>
         </div>
@@ -422,7 +441,7 @@ export function FinancialBalanceSection({
           <div>
             <h4 className="text-sm font-bold text-slate-900 flex items-center gap-2">
               <PieChart className="h-4 w-4 text-indigo-600" />
-              <span>Distribución Operativa del Ingreso (Flujo de Caja)</span>
+              <span>Distribución de los ingresos de las cuotas</span>
             </h4>
             <p className="text-xs text-slate-500 mt-0.5">
               Proporción de los ingresos del mes destinada a cubrir gastos fijos, variables y margen retenido.
@@ -451,7 +470,7 @@ export function FinancialBalanceSection({
               {/* Segmento Gastos Variables */}
               {summary.variablePercentageOfIncome > 0 && (
                 <div
-                  style={{ width: `${Math.min(100 - summary.fixedPercentageOfIncome, summary.variablePercentageOfIncome)}%` }}
+                  style={{ width: `${Math.max(0, Math.min(100 - summary.fixedPercentageOfIncome, summary.variablePercentageOfIncome))}%` }}
                   className="h-full bg-amber-500 transition-all duration-500 relative group cursor-pointer"
                   title={`Gastos Variables: ${summary.variablePercentageOfIncome}% (${formatCurrency(summary.variableExpensesSubtotal)})`}
                 />
@@ -507,7 +526,7 @@ export function FinancialBalanceSection({
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between">
                     <span className="font-semibold">
-                      {summary.isSurplus ? 'Margen Libre' : 'Déficit Cubierto'}
+                      {summary.isSurplus ? 'Margen Libre' : 'Déficit'}
                     </span>
                     <span className="font-bold">
                       {summary.isSurplus ? `${summary.freeMarginPercentageOfIncome}%` : '0%'}
@@ -532,7 +551,7 @@ export function FinancialBalanceSection({
           </div>
         ) : (
           <div className="p-4 rounded-xl bg-slate-50 border border-dashed border-slate-200 text-center text-xs text-slate-500">
-            No se han registrado cobros de mensualidades en {getMonthName(selectedMonth)} {selectedYear} para calcular la distribución porcentual.
+            No se han registrado cobros de las cuotas de {getMonthName(selectedMonth)} {selectedYear} para calcular la distribución porcentual.
           </div>
         )}
       </div>
@@ -682,7 +701,7 @@ export function FinancialBalanceSection({
                     >
                       {/* Fecha */}
                       <td className="py-3.5 px-4 font-semibold text-slate-700 whitespace-nowrap">
-                        {formatDate(exp.expenseDate)}
+                        {formatTuitionDate(exp.expenseDate)}
                       </td>
 
                       {/* Concepto / Título & Notas */}
@@ -833,6 +852,8 @@ export function FinancialBalanceSection({
           </div>
         </div>
       </div>
+
+      </>}
 
       {/* Modal para Crear Egreso */}
       <CreateExpenseModal

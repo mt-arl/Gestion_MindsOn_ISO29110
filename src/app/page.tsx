@@ -3,7 +3,7 @@ import { Header } from '@/components/Header';
 import { TuitionControlSection } from '@/components/TuitionControlSection';
 import { 
   getFinancialDashboardData, 
-  getCourseFinanceBreakdownAction,
+  getCourseFinanceGroups,
   getMonthlyCollectionHistoryAction,
   getAnnualCashflowSummaryAction
 } from '@/actions/finance';
@@ -15,21 +15,19 @@ import { tuitionDay } from '@/lib/tuition-dates';
 export const dynamic = 'force-dynamic';
 
 export default async function DashboardPage() {
+  const { fees } = await getFinancialDashboardData();
   const [
-    dashboardData, 
-    courseBreakdownData, 
+    courseGroups,
     monthlyHistoryData, 
     annualCashflowData,
     financialBalanceData
   ] = await Promise.all([
-    getFinancialDashboardData(),
-    getCourseFinanceBreakdownAction(),
+    getCourseFinanceGroups(),
     getMonthlyCollectionHistoryAction(),
     getAnnualCashflowSummaryAction(),
     getMonthlyFinancialBalanceAction(),
   ]);
 
-  const { fees } = dashboardData;
   const today = tuitionDay(new Date());
 
   return (
@@ -64,7 +62,7 @@ export default async function DashboardPage() {
           <TuitionControlSection 
             initialFees={fees} 
             currentPeriod={{ month: today.getUTCMonth() + 1, year: today.getUTCFullYear() }}
-            courseBreakdownData={courseBreakdownData} 
+            courseGroups={courseGroups}
             initialMonthlyHistoryData={monthlyHistoryData}
             initialAnnualCashflowData={annualCashflowData}
             initialFinancialBalanceData={financialBalanceData}

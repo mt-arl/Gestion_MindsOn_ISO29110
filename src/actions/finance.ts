@@ -11,8 +11,10 @@ import {
 } from '@prisma/client';
 import { getMonthName, formatTuitionDate } from '@/lib/utils';
 import { requireAuth } from '@/lib/require-auth';
+import { summarizeTuitionFees } from '@/lib/tuition-metrics';
+import { priorTuitionPaymentsWhere } from '@/lib/tuition-payments';
 import { issueMonthlyTuitions, syncMonthlyTuitions, withTuitionTransaction } from '@/lib/tuition-billing';
-import { tuitionDay, tuitionPeriodKey, upcomingTuitionDate, type TuitionPeriod } from '@/lib/tuition-dates';
+import { tuitionDay, tuitionPeriodKey, type TuitionPeriod } from '@/lib/tuition-dates';
 
 export type SerializedTuitionFee = {
   id: string;
@@ -220,7 +222,7 @@ export async function getFinancialDashboardData(
       level: fee.class.level,
       book: fee.class.book,
       modality: fee.class.modality,
-      classroom: fee.class.classroom?.name || 'Aula BRAZIL',
+      classroom: fee.class.classroom?.name || 'Sin aula asignada',
       unitSchedule: fee.class.unitSchedule,
       speakingSchedule: fee.class.speakingSchedule,
     },
@@ -366,6 +368,16 @@ export async function registerPaymentAction(
   }
 }
 
+function getPaymentMethod(notes: string | null): string {
+  const recordedMethod = notes?.match(/^\[(.*?)\]/)?.[1]?.trim();
+  if (recordedMethod) return recordedMethod;
+  const description = notes ?? '';
+  if (/efectivo/i.test(description)) return 'Efectivo';
+  if (/tarjeta|dep[oó]sito/i.test(description)) return 'Tarjeta / Depósito';
+  if (/transferencia|banco|qr/i.test(description)) return 'Transferencia Bancaria';
+  return 'Sin especificar';
+}
+
 /**
  * 3.1. Obtiene los datos oficiales para emitir el Comprobante de Pago Digital (Recibo / Voucher)
  */
@@ -426,15 +438,10 @@ export async function getPaymentReceiptDataAction(
     const student = fee.student;
     const cls = fee.class;
 
-    const receiptYear = new Date(payment.paymentDate).getFullYear();
+    const receiptYear = payment.paymentDate.getUTCFullYear();
     const receiptNumber = `REC-${receiptYear}-${payment.id.slice(-6).toUpperCase()}`;
 
-    // Extraer método de pago si viene en formato [Método] en notas
-    let paymentMethod = 'Transferencia Bancaria / Depósito';
-    const matchMethod = payment.notes?.match(/^\[(.*?)\]/);
-    if (matchMethod && matchMethod[1]) {
-      paymentMethod = matchMethod[1];
-    }
+    const paymentMethod = getPaymentMethod(payment.notes);
 
     return {
       success: true,
@@ -478,7 +485,7 @@ export async function getPaymentReceiptDataAction(
           name: cls.name,
           level: cls.level,
           book: cls.book,
-          classroom: cls.classroom?.name || 'Aula BRAZIL',
+          classroom: cls.classroom?.name || 'Sin aula asignada',
           modality: cls.modality,
           unitSchedule: cls.unitSchedule,
           speakingSchedule: cls.speakingSchedule || null,
@@ -597,7 +604,7 @@ export async function getStudentFinancialHistory(
         level: fee.class.level,
         book: fee.class.book,
         modality: fee.class.modality,
-        classroom: fee.class.classroom?.name || 'Aula BRAZIL',
+        classroom: fee.class.classroom?.name || 'Sin aula asignada',
         unitSchedule: fee.class.unitSchedule,
         speakingSchedule: fee.class.speakingSchedule,
       },
@@ -643,7 +650,7 @@ export async function getStudentFinancialHistory(
                 level: student.currentClass.level,
                 book: student.currentClass.book,
                 modality: student.currentClass.modality,
-                classroom: student.currentClass.classroom?.name || 'Aula BRAZIL',
+                classroom: student.currentClass.classroom?.name || 'Sin aula asignada',
                 unitSchedule: student.currentClass.unitSchedule,
                 speakingSchedule: student.currentClass.speakingSchedule,
               }
@@ -668,343 +675,19 @@ export async function getStudentFinancialHistory(
   }
 }
 
-export type StudentBreakdownInCourse = {
-  id: string;
-  ci: string | null;
-  firstName: string;
-  lastName: string;
-  email: string;
-  phone: string;
-  guardianPhone1: string | null;
-  guardianPhone2: string | null;
-  hasDisability: boolean;
-  notes: string | null;
-  monthlyFee: number;
-  nextPaymentDate: string | null;
-  outstandingBalance: number;
-  unpaidFeesCount: number;
-  contextualStatus: 'PAUSED' | 'OVERDUE' | 'PENDING' | 'PAID' | 'FUTURE_ENROLLMENT' | 'UNISSUED';
-  statusLabel: string;
-  feeStatus: TuitionFeeStatus | 'UNISSUED';
-  feeId: string | null;
-  feeMonth: number | null;
-  feeYear: number | null;
-  dueDate: string | null;
-  feeAmount: number;
-  amountPaid: number;
-  rawFee?: SerializedTuitionFee;
-};
-
-export type CourseFinanceBreakdownItem = {
-  id: string;
-  code: string;
-  name: string;
-  level: CourseLevel;
-  book: CourseBook;
-  modality: ClassModality;
-  classroom: string;
-  status: ClassStatus;
-  recessStartedAt: string | null;
-  recessReason: string | null;
-  unitTeacher: {
-    id: string;
-    name: string;
-    phone: string;
-  };
-  speakingTeacher: {
-    id: string;
-    name: string;
-    phone: string;
-  } | null;
-  students: StudentBreakdownInCourse[];
-  totals: {
-    activeStudentsCount: number;
-    totalProjected: number;
-    totalCollected: number;
-    totalPendingOrOverdue: number;
-    collectionRate: number;
-    paidCount: number;
-    pendingCount: number;
-    overdueCount: number;
-    unissuedCount: number;
-  };
-};
-
-export type CourseFinanceBreakdownResponse = {
-  month: number;
-  year: number;
-  courses: CourseFinanceBreakdownItem[];
-  globalTotals: {
-    totalProjected: number;
-    totalCollected: number;
-    totalPendingOrOverdue: number;
-    totalStudents: number;
-    globalCollectionRate: number;
-  };
-};
-
-/**
- * 6. Obtiene la recaudación y desglose de aranceles individuales por curso con lógica contextual
- */
-export async function getCourseFinanceBreakdownAction(
-  month?: number,
-  year?: number
-): Promise<CourseFinanceBreakdownResponse> {
-  try {
-    await requireAuth();
-    await syncMonthlyTuitions();
-
-    const now = new Date();
-    const today = tuitionDay(now);
-    const targetMonth = month || today.getUTCMonth() + 1;
-    const targetYear = year || today.getUTCFullYear();
-
-    const classes = await prisma.class.findMany({
-      include: {
-        classroom: true,
-        unitTeacher: true,
-        speakingTeacher: true,
-        students: {
-          where: { status: 'ACTIVE' },
-          include: {
-            tuitionFees: {
-              include: {
-                payments: true,
-                class: { include: { classroom: true } },
-              },
-              orderBy: [
-                { year: 'desc' },
-                { month: 'desc' },
-              ],
-            },
-          },
-          orderBy: { lastName: 'asc' },
-        },
-      },
-      orderBy: { code: 'asc' },
-    });
-
-    let globalProjected = 0;
-    let globalCollected = 0;
-    let globalPendingOrOverdue = 0;
-    let globalStudents = 0;
-
-    const courseBreakdowns: CourseFinanceBreakdownItem[] = classes.map((cls) => {
-      let courseProjected = 0;
-      let courseCollected = 0;
-      let coursePendingOrOverdue = 0;
-      let paidCount = 0;
-      let pendingCount = 0;
-      let overdueCount = 0;
-      let unissuedCount = 0;
-
-      const isClassInRecess = cls.status === ClassStatus.IN_RECESS;
-
-      const studentList: StudentBreakdownInCourse[] = cls.students.map((student) => {
-        const monthlyFeeNum = Number(student.monthlyFee);
-        courseProjected += monthlyFeeNum;
-
-        const unpaidFees = student.tuitionFees
-          .filter((fee) => fee.status !== TuitionFeeStatus.PAID)
-          .sort((a, b) => tuitionPeriodKey(a) - tuitionPeriodKey(b) || a.dueDate.getTime() - b.dueDate.getTime());
-        const overdueFees = unpaidFees.filter((fee) => fee.status === TuitionFeeStatus.OVERDUE);
-        const pendingFees = unpaidFees.filter((fee) => fee.status === TuitionFeeStatus.PENDING);
-        const paidFees = student.tuitionFees
-          .filter((fee) => fee.status === TuitionFeeStatus.PAID)
-          .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
-
-        const selectedFee = unpaidFees[0] || paidFees[0] || null;
-        const outstandingBalance = unpaidFees.reduce((sum, fee) => sum + Number(fee.amount), 0);
-        const nextPaymentDate = cls.status === ClassStatus.ACTIVE
-          ? upcomingTuitionDate(student.enrollmentDate, now, student.tuitionFees)
-          : null;
-        coursePendingOrOverdue += outstandingBalance;
-        courseCollected += paidFees
-          .filter((fee) => fee.classId === cls.id && fee.month === targetMonth && fee.year === targetYear)
-          .reduce((sum, fee) => sum + Number(fee.amount), 0);
-
-        let contextualStatus: StudentBreakdownInCourse['contextualStatus'] = 'UNISSUED';
-        let statusLabel = 'Sin emitir';
-
-        if (isClassInRecess) {
-          contextualStatus = 'PAUSED';
-          statusLabel = '⏸️ Curso en Receso';
-          unissuedCount++;
-        } else if (overdueFees.length > 0) {
-          contextualStatus = 'OVERDUE';
-          statusLabel = `⚠️ En Mora (${getMonthName(overdueFees[0].month)})`;
-          overdueCount++;
-        } else if (pendingFees.length > 0) {
-          contextualStatus = 'PENDING';
-          statusLabel = `⏳ Vence el ${formatTuitionDate(pendingFees[0].dueDate)}`;
-          pendingCount++;
-        } else if (paidFees.length > 0) {
-          contextualStatus = 'PAID';
-          statusLabel = '✓ Al Día';
-          paidCount++;
-        } else if (nextPaymentDate) {
-          contextualStatus = 'FUTURE_ENROLLMENT';
-          statusLabel = `🗓️ Próx. Cobro: ${formatTuitionDate(nextPaymentDate)}`;
-          unissuedCount++;
-        } else {
-          unissuedCount++;
-        }
-
-        // 3. Serializar cuota activa para permitir pago directo si aplica
-        let rawFee: SerializedTuitionFee | undefined = undefined;
-        if (selectedFee) {
-          rawFee = {
-            id: selectedFee.id,
-            studentId: student.id,
-            classId: selectedFee.classId,
-            month: selectedFee.month,
-            year: selectedFee.year,
-            dueDate: selectedFee.dueDate.toISOString(),
-            amount: Number(selectedFee.amount),
-            status: selectedFee.status,
-            blockedByPeriod: null,
-            createdAt: selectedFee.createdAt.toISOString(),
-            updatedAt: selectedFee.updatedAt.toISOString(),
-            student: {
-              id: student.id,
-              ci: student.ci,
-              firstName: student.firstName,
-              lastName: student.lastName,
-              email: student.email,
-              phone: student.phone,
-              guardianPhone1: student.guardianPhone1,
-              guardianPhone2: student.guardianPhone2,
-              address: student.address,
-              status: student.status,
-              monthlyFee: Number(student.monthlyFee),
-            },
-            class: {
-              id: selectedFee.class.id,
-              code: selectedFee.class.code,
-              name: selectedFee.class.name,
-              level: selectedFee.class.level,
-              book: selectedFee.class.book,
-              modality: selectedFee.class.modality,
-              classroom: selectedFee.class.classroom?.name || 'Aula BRAZIL',
-              unitSchedule: selectedFee.class.unitSchedule,
-              speakingSchedule: selectedFee.class.speakingSchedule,
-            },
-            payments: selectedFee.payments.map((p) => ({
-              id: p.id,
-              amountPaid: Number(p.amountPaid),
-              paymentDate: p.paymentDate.toISOString(),
-              registeredBy: p.registeredBy,
-              notes: p.notes,
-            })),
-          };
-        }
-
-        const amountPaid = selectedFee
-          ? selectedFee.payments.reduce((sum, p) => sum + Number(p.amountPaid), 0)
-          : 0;
-
-        return {
-          id: student.id,
-          ci: student.ci,
-          firstName: student.firstName,
-          lastName: student.lastName,
-          email: student.email,
-          phone: student.phone,
-          guardianPhone1: student.guardianPhone1,
-          guardianPhone2: student.guardianPhone2,
-          hasDisability: student.hasDisability,
-          notes: student.notes,
-          monthlyFee: monthlyFeeNum,
-          nextPaymentDate: nextPaymentDate?.toISOString() ?? null,
-          outstandingBalance,
-          unpaidFeesCount: unpaidFees.length,
-          contextualStatus,
-          statusLabel,
-          feeStatus: selectedFee ? selectedFee.status : 'UNISSUED',
-          feeId: selectedFee ? selectedFee.id : null,
-          feeMonth: selectedFee ? selectedFee.month : null,
-          feeYear: selectedFee ? selectedFee.year : null,
-          dueDate: selectedFee ? selectedFee.dueDate.toISOString() : null,
-          feeAmount: selectedFee ? Number(selectedFee.amount) : monthlyFeeNum,
-          amountPaid,
-          rawFee,
-        };
-      });
-
-      const collectionRate = courseProjected > 0 ? (courseCollected / courseProjected) * 100 : 0;
-
-      globalProjected += courseProjected;
-      globalCollected += courseCollected;
-      globalPendingOrOverdue += coursePendingOrOverdue;
-      globalStudents += cls.students.length;
-
-      return {
-        id: cls.id,
-        code: cls.code,
-        name: cls.name,
-        level: cls.level,
-        book: cls.book,
-        modality: cls.modality,
-        classroom: cls.classroom?.name || 'Aula BRAZIL',
-        status: cls.status,
-        recessStartedAt: cls.recessStartedAt ? cls.recessStartedAt.toISOString() : null,
-        recessReason: cls.recessReason,
-        unitTeacher: {
-          id: cls.unitTeacher.id,
-          name: `${cls.unitTeacher.firstName} ${cls.unitTeacher.lastName}`,
-          phone: cls.unitTeacher.phone,
-        },
-        speakingTeacher: cls.speakingTeacher ? {
-          id: cls.speakingTeacher.id,
-          name: `${cls.speakingTeacher.firstName} ${cls.speakingTeacher.lastName}`,
-          phone: cls.speakingTeacher.phone,
-        } : null,
-        students: studentList,
-        totals: {
-          activeStudentsCount: cls.students.length,
-          totalProjected: courseProjected,
-          totalCollected: courseCollected,
-          totalPendingOrOverdue: coursePendingOrOverdue,
-          collectionRate: Math.round(collectionRate * 10) / 10,
-          paidCount,
-          pendingCount,
-          overdueCount,
-          unissuedCount,
-        },
-      };
-    });
-
-    const globalCollectionRate =
-      globalProjected > 0 ? Math.round(((globalCollected / globalProjected) * 100) * 10) / 10 : 0;
-
-    return {
-      month: targetMonth,
-      year: targetYear,
-      courses: courseBreakdowns,
-      globalTotals: {
-        totalProjected: globalProjected,
-        totalCollected: globalCollected,
-        totalPendingOrOverdue: globalPendingOrOverdue,
-        totalStudents: globalStudents,
-        globalCollectionRate,
-      },
-    };
-  } catch (error) {
-    console.error('Error al obtener desglose financiero por curso:', error);
-    return {
-      month: month || new Date().getMonth() + 1,
-      year: year || new Date().getFullYear(),
-      courses: [],
-      globalTotals: {
-        totalProjected: 0,
-        totalCollected: 0,
-        totalPendingOrOverdue: 0,
-        totalStudents: 0,
-        globalCollectionRate: 0,
-      },
-    };
-  }
+export async function getCourseFinanceGroups() {
+  await requireAuth();
+  return prisma.class.findMany({
+    select: {
+      id: true,
+      status: true,
+      unitTeacher: { select: { firstName: true, lastName: true } },
+      speakingTeacher: { select: { firstName: true, lastName: true } },
+    },
+  });
 }
+
+export type CourseFinanceGroup = Awaited<ReturnType<typeof getCourseFinanceGroups>>[number];
 
 export type MonthlyPaymentTransaction = {
   id: string;
@@ -1015,6 +698,7 @@ export type MonthlyPaymentTransaction = {
   registeredBy: string;
   notes: string | null;
   paymentMethod: string;
+  methodGroup: 'transfer' | 'cash' | 'cardOrDeposit' | 'other';
   referenceNumber: string | null;
   invoiceNumber?: string | null;
   feeId: string;
@@ -1041,6 +725,7 @@ export type MonthlyPaymentTransaction = {
 };
 
 export type MonthlyCollectionHistoryResponse = {
+  error?: true;
   month: number;
   year: number;
   monthName: string;
@@ -1053,11 +738,13 @@ export type MonthlyCollectionHistoryResponse = {
       cardOrDeposit: number;
       other: number;
     };
+    paidMonth: number;
     projectedMonth: number;
     overdueMonth: number;
     recoveryRate: number;
   };
   transactions: MonthlyPaymentTransaction[];
+  priorPeriodTransactions: MonthlyPaymentTransaction[];
 };
 
 export type MonthCashflowSummary = {
@@ -1071,6 +758,7 @@ export type MonthCashflowSummary = {
 };
 
 export type AnnualCashflowSummaryResponse = {
+  error?: true;
   year: number;
   annualTotalCollected: number;
   annualTotalProjected: number;
@@ -1089,118 +777,65 @@ export async function getMonthlyCollectionHistoryAction(
   try {
     await requireAuth();
     const now = new Date();
-    const targetYear = typeof year === 'number' && year >= 2020 && year <= 2100 ? year : now.getFullYear();
-    const targetMonth = typeof month === 'number' && month >= 1 && month <= 12 ? month : now.getMonth() + 1;
+    const today = tuitionDay(now);
+    const targetYear = typeof year === 'number' && Number.isInteger(year) && year >= 2020 && year <= 2100 ? year : today.getUTCFullYear();
+    const targetMonth = typeof month === 'number' && Number.isInteger(month) && month >= 1 && month <= 12 ? month : today.getUTCMonth() + 1;
+    await syncMonthlyTuitions();
 
-    const startOfMonth = new Date(targetYear, targetMonth - 1, 1, 0, 0, 0, 0);
-    const endOfMonth = new Date(targetYear, targetMonth, 0, 23, 59, 59, 999);
-
-    // 1. Obtener pagos del mes (por fecha de pago o cuota del periodo)
-    const payments = await prisma.payment.findMany({
-      where: {
-        OR: [
-          {
-            paymentDate: {
-              gte: startOfMonth,
-              lte: endOfMonth,
-            },
-          },
-          {
-            tuitionFee: {
-              month: targetMonth,
-              year: targetYear,
-            },
-          },
-        ],
-      },
-      include: {
-        tuitionFee: {
-          include: {
-            student: true,
-            class: {
-              include: {
-                classroom: true,
-              },
-            },
+    const period = { year: targetYear, month: targetMonth };
+    const [payments, fees] = await Promise.all([
+      prisma.payment.findMany({
+        where: {
+          OR: [
+            { tuitionFee: period, paymentDate: { lte: now } },
+            priorTuitionPaymentsWhere(period, now),
+          ],
+        },
+        include: {
+          tuitionFee: {
+            include: { student: true, class: { include: { classroom: true } } },
           },
         },
-      },
-      orderBy: {
-        paymentDate: 'desc',
-      },
-    });
+        orderBy: { paymentDate: 'desc' },
+      }),
+      prisma.tuitionFee.findMany({
+        where: { month: targetMonth, year: targetYear },
+        select: { amount: true, status: true, studentId: true },
+      }),
+    ]);
 
-    // 2. Obtener todas las cuotas emitidas para el mes seleccionado
-    const targetMonthFees = await prisma.tuitionFee.findMany({
-      where: {
-        month: targetMonth,
-        year: targetYear,
-      },
-    });
+    const tuition = summarizeTuitionFees(fees.map((fee) => ({ ...fee, amount: Number(fee.amount) })));
+    const methodCents = { transfer: 0, cash: 0, cardOrDeposit: 0, other: 0 };
+    let collectedCents = 0;
 
-    let projectedMonth = 0;
-    let overdueMonth = 0;
-
-    for (const fee of targetMonthFees) {
-      const feeAmt = Number(fee.amount);
-      projectedMonth += feeAmt;
-      if (fee.status === TuitionFeeStatus.OVERDUE || fee.status === TuitionFeeStatus.PENDING) {
-        overdueMonth += feeAmt;
-      }
-    }
-
-    // 3. Procesar transacciones y desglose por método de pago
-    let totalCollected = 0;
-    let transferTotal = 0;
-    let cashTotal = 0;
-    let cardOrDepositTotal = 0;
-    let otherTotal = 0;
-
-    const transactions: MonthlyPaymentTransaction[] = payments.map((p) => {
+    const transactions: MonthlyPaymentTransaction[] = [];
+    const priorPeriodTransactions: MonthlyPaymentTransaction[] = [];
+    for (const p of payments) {
+      const isSelectedFee = p.tuitionFee.year === targetYear && p.tuitionFee.month === targetMonth;
       const amt = Number(p.amountPaid);
-      totalCollected += amt;
+      const cents = Math.round(amt * 100);
+      if (isSelectedFee) collectedCents += cents;
 
       const notesStr = p.notes || '';
-      let paymentMethod = 'Transferencia Bancaria';
+      const paymentMethod = getPaymentMethod(p.notes);
       let referenceNumber: string | null = null;
-
-      const methodMatch = notesStr.match(/\[(.*?)\]/);
-      if (methodMatch) {
-        paymentMethod = methodMatch[1];
-      } else if (/efectivo/i.test(notesStr)) {
-        paymentMethod = 'Efectivo';
-      } else if (/tarjeta|deposito|depósito/i.test(notesStr)) {
-        paymentMethod = 'Tarjeta / Depósito';
-      }
 
       const refMatch = notesStr.match(/ref(?:erencia)?[:\s#]*([a-zA-Z0-9_-]+)/i);
       if (refMatch) {
         referenceNumber = refMatch[1];
       }
 
-      // Clasificación para métricas
-      const lowerMethod = paymentMethod.toLowerCase();
-      if (lowerMethod.includes('efectivo') || lowerMethod.includes('cash')) {
-        cashTotal += amt;
-      } else if (
-        lowerMethod.includes('transferencia') || 
-        lowerMethod.includes('banco') || 
-        lowerMethod.includes('qr') || 
-        lowerMethod.includes('pichincha') || 
-        lowerMethod.includes('guayaquil') || 
-        lowerMethod.includes('produbanco')
-      ) {
-        transferTotal += amt;
-      } else if (lowerMethod.includes('tarjeta') || lowerMethod.includes('depósito') || lowerMethod.includes('deposito')) {
-        cardOrDepositTotal += amt;
-      } else {
-        otherTotal += amt;
-      }
+      const method = paymentMethod.toLowerCase();
+      let methodGroup: MonthlyPaymentTransaction['methodGroup'] = 'other';
+      if (/efectivo|cash/.test(method)) methodGroup = 'cash';
+      else if (/tarjeta|depósito|deposito/.test(method)) methodGroup = 'cardOrDeposit';
+      else if (/transferencia|banco|qr|pichincha|guayaquil/.test(method)) methodGroup = 'transfer';
+      if (isSelectedFee) methodCents[methodGroup] += cents;
 
-      const receiptYear = new Date(p.paymentDate).getFullYear();
+      const receiptYear = p.paymentDate.getUTCFullYear();
       const receiptNumber = `REC-${receiptYear}-${p.id.slice(-6).toUpperCase()}`;
 
-      return {
+      const transaction: MonthlyPaymentTransaction = {
         id: p.id,
         paymentId: p.id,
         receiptNumber,
@@ -1209,6 +844,7 @@ export async function getMonthlyCollectionHistoryAction(
         registeredBy: p.registeredBy,
         notes: p.notes,
         paymentMethod,
+        methodGroup,
         referenceNumber,
         invoiceNumber: p.invoiceNumber,
         feeId: p.tuitionFee.id,
@@ -1230,38 +866,41 @@ export async function getMonthlyCollectionHistoryAction(
           name: p.tuitionFee.class.name,
           level: p.tuitionFee.class.level,
           book: p.tuitionFee.class.book,
-          classroom: p.tuitionFee.class.classroom?.name || 'Aula BRAZIL',
+          classroom: p.tuitionFee.class.classroom?.name || 'Sin aula asignada',
         },
       };
-    });
-
-    const recoveryRate = projectedMonth > 0 ? Math.round(((totalCollected / projectedMonth) * 100) * 10) / 10 : 0;
+      if (isSelectedFee) transactions.push(transaction);
+      else priorPeriodTransactions.push(transaction);
+    }
 
     return {
       month: targetMonth,
       year: targetYear,
       monthName: getMonthName(targetMonth),
       metrics: {
-        totalCollected,
+        totalCollected: collectedCents / 100,
         paymentCount: transactions.length,
         byMethod: {
-          transfer: transferTotal,
-          cash: cashTotal,
-          cardOrDeposit: cardOrDepositTotal,
-          other: otherTotal,
+          transfer: methodCents.transfer / 100,
+          cash: methodCents.cash / 100,
+          cardOrDeposit: methodCents.cardOrDeposit / 100,
+          other: methodCents.other / 100,
         },
-        projectedMonth,
-        overdueMonth,
-        recoveryRate,
+        paidMonth: tuition.totalPaid,
+        projectedMonth: tuition.issuedAmount,
+        overdueMonth: tuition.outstandingAmount,
+        recoveryRate: tuition.collectionRate,
       },
       transactions,
+      priorPeriodTransactions,
     };
   } catch (error) {
     console.error('Error al obtener historial mensual de recaudación:', error);
-    const now = new Date();
-    const fallbackMonth = typeof month === 'number' && month >= 1 && month <= 12 ? month : now.getMonth() + 1;
-    const fallbackYear = typeof year === 'number' && year >= 2020 ? year : now.getFullYear();
+    const now = tuitionDay(new Date());
+    const fallbackMonth = typeof month === 'number' && month >= 1 && month <= 12 ? month : now.getUTCMonth() + 1;
+    const fallbackYear = typeof year === 'number' && year >= 2020 ? year : now.getUTCFullYear();
     return {
+      error: true,
       month: fallbackMonth,
       year: fallbackYear,
       monthName: getMonthName(fallbackMonth),
@@ -1269,35 +908,38 @@ export async function getMonthlyCollectionHistoryAction(
         totalCollected: 0,
         paymentCount: 0,
         byMethod: { transfer: 0, cash: 0, cardOrDeposit: 0, other: 0 },
+        paidMonth: 0,
         projectedMonth: 0,
         overdueMonth: 0,
         recoveryRate: 0,
       },
       transactions: [],
+      priorPeriodTransactions: [],
     };
   }
 }
 
 /**
- * 7. Obtiene el Resumen Anual de Flujo de Caja y Cierres (Enero - Diciembre)
+ * 7. Obtiene el Resumen anual de cobros por periodo de cuota (Enero - Diciembre)
  */
 export async function getAnnualCashflowSummaryAction(
   year?: number
 ): Promise<AnnualCashflowSummaryResponse> {
   try {
     await requireAuth();
-    const targetYear = typeof year === 'number' && year >= 2020 && year <= 2100 ? year : new Date().getFullYear();
+    const targetYear = typeof year === 'number' && year >= 2020 && year <= 2100 ? year : tuitionDay(new Date()).getUTCFullYear();
 
-    const startOfYear = new Date(targetYear, 0, 1, 0, 0, 0, 0);
-    const endOfYear = new Date(targetYear, 11, 31, 23, 59, 59, 999);
+    await syncMonthlyTuitions();
 
     const [annualPayments, annualFees] = await Promise.all([
       prisma.payment.findMany({
         where: {
-          paymentDate: {
-            gte: startOfYear,
-            lte: endOfYear,
-          },
+          tuitionFee: { year: targetYear },
+          paymentDate: { lte: new Date() },
+        },
+        select: {
+          amountPaid: true,
+          tuitionFee: { select: { month: true } },
         },
       }),
       prisma.tuitionFee.findMany({
@@ -1307,67 +949,45 @@ export async function getAnnualCashflowSummaryAction(
       }),
     ]);
 
-    let annualTotalCollected = 0;
-    let annualTotalProjected = 0;
+
 
     const monthsData: MonthCashflowSummary[] = [];
 
     for (let m = 1; m <= 12; m++) {
-      const monthPayments = annualPayments.filter((p) => {
-        const pMonth = new Date(p.paymentDate).getMonth() + 1;
-        return pMonth === m;
-      });
+      const monthPayments = annualPayments.filter((payment) => payment.tuitionFee.month === m);
 
       const monthFees = annualFees.filter((f) => f.month === m);
 
-      let monthCollected = 0;
-      for (const p of monthPayments) {
-        monthCollected += Number(p.amountPaid);
-      }
+      const monthCollected = monthPayments.reduce((cents, p) => cents + Math.round(Number(p.amountPaid) * 100), 0) / 100;
 
-      let monthProjected = 0;
-      let monthOverdue = 0;
-      for (const f of monthFees) {
-        const fAmt = Number(f.amount);
-        monthProjected += fAmt;
-        if (f.status === TuitionFeeStatus.OVERDUE || f.status === TuitionFeeStatus.PENDING) {
-          monthOverdue += fAmt;
-        }
-      }
-
-      const collectionRate = monthProjected > 0 ? Math.round(((monthCollected / monthProjected) * 100) * 10) / 10 : 0;
-
-      annualTotalCollected += monthCollected;
-      annualTotalProjected += monthProjected;
+      const tuition = summarizeTuitionFees(monthFees.map((fee) => ({ ...fee, amount: Number(fee.amount) })));
 
       monthsData.push({
         month: m,
         monthName: getMonthName(m),
         totalCollected: monthCollected,
-        totalProjected: monthProjected,
-        totalOverdue: monthOverdue,
+        totalProjected: tuition.issuedAmount,
+        totalOverdue: tuition.outstandingAmount,
         paymentCount: monthPayments.length,
-        collectionRate,
+        collectionRate: tuition.collectionRate,
       });
     }
 
-    const averageCollectionRate =
-      annualTotalProjected > 0
-        ? Math.round(((annualTotalCollected / annualTotalProjected) * 100) * 10) / 10
-        : 0;
+    const annualTuition = summarizeTuitionFees(annualFees.map((fee) => ({ ...fee, amount: Number(fee.amount) })));
 
     return {
       year: targetYear,
-      annualTotalCollected,
-      annualTotalProjected,
+      annualTotalCollected: annualPayments.reduce((cents, p) => cents + Math.round(Number(p.amountPaid) * 100), 0) / 100,
+      annualTotalProjected: annualTuition.issuedAmount,
       annualTotalPayments: annualPayments.length,
-      averageCollectionRate,
+      averageCollectionRate: annualTuition.collectionRate,
       months: monthsData,
     };
   } catch (error) {
-    console.error('Error al obtener resumen anual de flujo de caja:', error);
-    const fallbackYear = typeof year === 'number' && year >= 2020 ? year : new Date().getFullYear();
+    console.error('Error al obtener resumen anual de cobros:', error);
+    const fallbackYear = typeof year === 'number' && year >= 2020 ? year : tuitionDay(new Date()).getUTCFullYear();
     return {
+      error: true,
       year: fallbackYear,
       annualTotalCollected: 0,
       annualTotalProjected: 0,

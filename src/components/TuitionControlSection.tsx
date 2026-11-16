@@ -27,7 +27,7 @@ import {
 } from 'lucide-react';
 import { 
   SerializedTuitionFee, 
-  CourseFinanceBreakdownResponse,
+  CourseFinanceGroup,
   MonthlyCollectionHistoryResponse,
   AnnualCashflowSummaryResponse
 } from '@/actions/finance';
@@ -46,7 +46,7 @@ import { TuitionPaymentBlocked } from './TuitionPaymentBlocked';
 interface TuitionControlSectionProps {
   initialFees: SerializedTuitionFee[];
   currentPeriod: { month: number; year: number };
-  courseBreakdownData: CourseFinanceBreakdownResponse;
+  courseGroups: CourseFinanceGroup[];
   initialMonthlyHistoryData?: MonthlyCollectionHistoryResponse;
   initialAnnualCashflowData?: AnnualCashflowSummaryResponse;
   initialFinancialBalanceData?: MonthlyFinancialBalanceResponse;
@@ -62,11 +62,12 @@ function periodKey(year: number, month: number) {
 export function TuitionControlSection({ 
   initialFees, 
   currentPeriod: { month: currentMonth, year: currentYear },
-  courseBreakdownData,
+  courseGroups,
   initialMonthlyHistoryData,
   initialAnnualCashflowData,
   initialFinancialBalanceData
 }: TuitionControlSectionProps) {
+  const [cashPeriod, setCashPeriod] = useState<{ year: number; month: number }>();
   const [mainView, setMainView] = useState<MainDashboardView>('GENERAL');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedTab, setSelectedTab] = useState<TabFilter>('ALL');
@@ -95,6 +96,7 @@ export function TuitionControlSection({
   const activePeriod = selectedPeriod === 'ALL' || periods.has(selectedPeriod)
     ? selectedPeriod
     : currentPeriodKey;
+  const selectedPickerPeriod = mainView === 'BY_COURSE' && activePeriod === 'ALL' ? currentPeriodKey : activePeriod;
   const monthlyRecord = activePeriod === 'ALL' ? undefined : periods.get(activePeriod);
   const periodFees = monthlyRecord?.fees ?? initialFees;
   const metricsPeriod = monthlyRecord ?? periods.get(currentPeriodKey)!;
@@ -155,35 +157,37 @@ export function TuitionControlSection({
 
   return (
     <div className="space-y-6">
-      <section aria-labelledby="monthly-metrics-title" className="space-y-4">
-        <h2 id="monthly-metrics-title" className="text-sm font-bold text-slate-700">
-          Métricas de {metricsPeriodTitle}
-        </h2>
-        {/* Alerta Destacada si existen estudiantes en mora */}
-        {metrics.overdueCount > 0 && (
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 rounded-2xl bg-gradient-to-r from-rose-500/90 via-rose-600/95 to-rose-600 p-5 text-white shadow-xl shadow-rose-500/10 border border-rose-500/20">
-            <div className="flex items-center gap-3.5">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/10 border border-white/15 backdrop-blur-md shadow-inner">
-                <AlertOctagon className="h-5 w-5 text-rose-100" />
+      {(mainView === 'GENERAL' || mainView === 'BY_COURSE') && (
+        <section aria-labelledby="monthly-metrics-title" className="space-y-4">
+          <h2 id="monthly-metrics-title" className="text-sm font-bold text-slate-700">
+            Métricas de {metricsPeriodTitle}
+          </h2>
+          {/* Alerta Destacada si existen estudiantes en mora */}
+          {metrics.overdueCount > 0 && (
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 rounded-2xl bg-gradient-to-r from-rose-500/90 via-rose-600/95 to-rose-600 p-5 text-white shadow-xl shadow-rose-500/10 border border-rose-500/20">
+              <div className="flex items-center gap-3.5">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/10 border border-white/15 backdrop-blur-md shadow-inner">
+                  <AlertOctagon className="h-5 w-5 text-rose-100" />
+                </div>
+                <div>
+                  <h3 className="font-black text-sm sm:text-base leading-tight tracking-wide">
+                    {metrics.overdueCount} {metrics.overdueCount === 1 ? 'mensualidad vencida' : 'mensualidades vencidas'}
+                  </h3>
+                  <p className="text-xs text-rose-100/90 mt-1 font-medium">
+                    El saldo vencido es de <strong className="text-white underline decoration-white/40 underline-offset-2">{formatCurrency(metrics.totalOverdue)}</strong> correspondiente a {metrics.overdueStudentsCount} {metrics.overdueStudentsCount === 1 ? 'estudiante' : 'estudiantes'}.
+                  </p>
+                </div>
               </div>
-              <div>
-                <h3 className="font-black text-sm sm:text-base leading-tight tracking-wide">
-                  {metrics.overdueCount} {metrics.overdueCount === 1 ? 'mensualidad vencida' : 'mensualidades vencidas'}
-                </h3>
-                <p className="text-xs text-rose-100/90 mt-1 font-medium">
-                  El saldo vencido es de <strong className="text-white underline decoration-white/40 underline-offset-2">{formatCurrency(metrics.totalOverdue)}</strong> correspondiente a {metrics.overdueStudentsCount} {metrics.overdueStudentsCount === 1 ? 'estudiante' : 'estudiantes'}.
-                </p>
+              <div className="shrink-0">
+                <span className="inline-flex items-center gap-1.5 rounded-xl bg-white px-3.5 py-1.5 text-xs font-black text-rose-700 shadow-[0_4px_12px_rgba(0,0,0,0.05)] border border-rose-100/20">
+                  Cobranza Prioritaria
+                </span>
               </div>
             </div>
-            <div className="shrink-0">
-              <span className="inline-flex items-center gap-1.5 rounded-xl bg-white px-3.5 py-1.5 text-xs font-black text-rose-700 shadow-[0_4px_12px_rgba(0,0,0,0.05)] border border-rose-100/20">
-                Cobranza Prioritaria
-              </span>
-            </div>
-          </div>
-        )}
-        <MetricCards metrics={metrics} />
-      </section>
+          )}
+          <MetricCards metrics={metrics} />
+        </section>
+      )}
 
       {/* 1. Selector Superior de Vista Principal (Segmented Control Moderno) */}
       <div className="inline-flex flex-wrap items-center gap-1.5 p-1.5 bg-slate-100/90 border border-slate-200/80 rounded-2xl shadow-inner">
@@ -229,7 +233,7 @@ export function TuitionControlSection({
                 : 'bg-slate-200/80 text-slate-600'
             }`}
           >
-            {courseBreakdownData.courses.length} grupos
+            {new Set(metricsPeriod.fees.map((fee) => fee.classId)).size} cursos
           </span>
         </button>
 
@@ -262,39 +266,28 @@ export function TuitionControlSection({
         </button>
       </div>
 
-      {/* 2. Contenido Condicional según Pestaña Principal */}
-      {mainView === 'BALANCE' ? (
-        <FinancialBalanceSection initialData={initialFinancialBalanceData} />
-      ) : mainView === 'HISTORY' && initialMonthlyHistoryData && initialAnnualCashflowData ? (
-        <MonthlyCollectionHistorySection
-          initialMonthlyData={initialMonthlyHistoryData}
-          initialAnnualData={initialAnnualCashflowData}
-        />
-      ) : mainView === 'BY_COURSE' ? (
-        <CourseFinanceBreakdown initialData={courseBreakdownData} />
-      ) : (
-        <div className="space-y-5">
+      {(mainView === 'GENERAL' || mainView === 'BY_COURSE') && (
           <div className="min-w-0 rounded-2xl border border-slate-200/80 bg-white px-4 py-3">
             <p id="tuition-period-label" className="mb-2 flex items-center gap-1.5 text-xs font-bold text-slate-600">
               <Calendar className="h-4 w-4 text-indigo-600" aria-hidden="true" />
               Historial mensual de cuotas
             </p>
             <div role="group" aria-labelledby="tuition-period-label" className="flex items-center gap-2 overflow-x-auto pb-1">
-              {periodOptions.map(({ key, label, count, settled }) => (
+              {periodOptions.filter(({ key }) => mainView === 'GENERAL' || key !== 'ALL').map(({ key, label, count, settled }) => (
                 <button
                   key={key}
                   type="button"
-                  aria-pressed={activePeriod === key}
+                  aria-pressed={selectedPickerPeriod === key}
                   onClick={() => openPeriod(key)}
                   className={`inline-flex shrink-0 items-center gap-2 rounded-xl border px-3 py-2 text-xs font-bold focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-indigo-500 ${
-                    activePeriod === key
+                    selectedPickerPeriod === key
                       ? 'border-indigo-700 bg-indigo-700 text-white'
                       : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-indigo-200 hover:bg-indigo-50'
                   }`}
                 >
-                  {settled && <CheckCircle2 className={`h-3.5 w-3.5 ${activePeriod === key ? 'text-white' : 'text-emerald-600'}`} aria-hidden="true" />}
+                  {settled && <CheckCircle2 className={`h-3.5 w-3.5 ${selectedPickerPeriod === key ? 'text-white' : 'text-emerald-600'}`} aria-hidden="true" />}
                   {label}
-                  <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${activePeriod === key ? 'bg-white/20' : 'bg-slate-200'}`}>
+                  <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${selectedPickerPeriod === key ? 'bg-white/20' : 'bg-slate-200'}`}>
                     {count}
                   </span>
                   {settled && <span className="sr-only">Todas las cuotas pagadas</span>}
@@ -302,7 +295,27 @@ export function TuitionControlSection({
               ))}
             </div>
           </div>
+      )}
 
+      {/* 2. Contenido Condicional según Pestaña Principal */}
+      {mainView === 'BALANCE' ? (
+        <FinancialBalanceSection
+          initialData={initialFinancialBalanceData}
+          onViewPayments={(year, month) => {
+            setCashPeriod({ year, month });
+            setMainView('HISTORY');
+          }}
+        />
+      ) : mainView === 'HISTORY' && initialMonthlyHistoryData && initialAnnualCashflowData ? (
+        <MonthlyCollectionHistorySection
+          initialMonthlyData={initialMonthlyHistoryData}
+          initialAnnualData={initialAnnualCashflowData}
+          initialPeriod={cashPeriod}
+        />
+      ) : mainView === 'BY_COURSE' ? (
+        <CourseFinanceBreakdown groups={courseGroups} fees={metricsPeriod.fees} periodTitle={metricsPeriodTitle} />
+      ) : (
+        <div className="space-y-5">
           <section aria-labelledby="tuition-record-title" className="rounded-2xl border border-slate-200/80 bg-white p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h3 id="tuition-record-title" className="text-sm font-black text-slate-900">

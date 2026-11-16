@@ -72,14 +72,16 @@ export function getBookForLevel(level: 'INTRO_A' | 'INTRO_B' | 'L1A' | 'L1B' | '
 /**
  * Formatea una fecha y hora a formato legible en español (DD/MM/YYYY - HH:mm)
  */
-export function formatDateTime(date: Date | string): string {
+export function formatDateTime(date: Date | string, timeZone?: string): string {
   const d = typeof date === 'string' ? new Date(date) : date;
   const datePart = new Intl.DateTimeFormat('es-ES', {
+    timeZone,
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
   }).format(d);
   const timePart = new Intl.DateTimeFormat('es-ES', {
+    timeZone,
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
