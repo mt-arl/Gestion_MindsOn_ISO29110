@@ -1,0 +1,540 @@
+\documentclass[11pt,a4paper]{article}
+
+% ============================================================================
+% PAQUETES ESTÁNDAR COMPATIBLES CON OVERLEAF (pdflatex / xelatex)
+% ============================================================================
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[spanish,es-tabla]{babel}
+\usepackage{geometry}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage{xcolor}
+\usepackage{colortbl}
+\usepackage{listings}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{hyperref}
+\usepackage{amsmath}
+\usepackage{amssymb}
+
+\geometry{
+  top=2.3cm,
+  bottom=2.3cm,
+  left=2.2cm,
+  right=2.2cm,
+  headheight=15pt
+}
+
+% Paleta de colores institucional
+\definecolor{espeGreen}{RGB}{0, 102, 51}
+\definecolor{mindsonBlue}{RGB}{30, 58, 138}
+\definecolor{slateBg}{RGB}{248, 250, 252}
+\definecolor{tableHeader}{RGB}{226, 232, 240}
+\definecolor{codeBg}{RGB}{245, 247, 250}
+\definecolor{codeFrame}{RGB}{203, 213, 225}
+\definecolor{okGreen}{RGB}{22, 101, 52}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=mindsonBlue,
+  urlcolor=mindsonBlue,
+  citecolor=espeGreen,
+  pdftitle={Implementacion ISO/IEC 29110 Perfil Basico - Proyecto MindsOn},
+  pdfauthor={Grupo 6 - ESPE}
+}
+
+% Configuración de bloques de código
+\lstset{
+  backgroundcolor=\color{codeBg},
+  frame=single,
+  rulecolor=\color{codeFrame},
+  basicstyle=\ttfamily\footnotesize,
+  breaklines=true,
+  breakatwhitespace=true,
+  captionpos=b,
+  numbers=left,
+  numberstyle=\tiny\color{gray},
+  tabsize=2,
+  showstringspaces=false,
+  literate=
+    {á}{{\'a}}1 {é}{{\'e}}1 {í}{{\'i}}1 {ó}{{\'o}}1 {ú}{{\'u}}1
+    {Á}{{\'A}}1 {É}{{\'E}}1 {Í}{{\'I}}1 {Ó}{{\'O}}1 {Ú}{{\'U}}1
+    {ñ}{{\~n}}1 {Ñ}{{\~N}}1 {¿}{{?`}}1 {¡}{{!`}}1
+    {✔}{{[OK]}}1 {▶}{{>}}1 {ℹ}{{[i]}}1
+}
+
+% Encabezados y pies de página
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{\footnotesize \textbf{ISO/IEC 29110 -- Perfil Básico} $\cdot$ Proyecto MindsOn}
+\rhead{\footnotesize Universidad de las Fuerzas Armadas ESPE $\cdot$ 2026}
+\cfoot{\footnotesize Página \thepage}
+
+\titleformat{\section}{\large\bfseries\color{mindsonBlue}}{\thesection.}{0.5em}{}[\titlerule]
+\titleformat{\subsection}{\normalsize\bfseries\color{espeGreen}}{\thesubsection.}{0.5em}{}
+\titleformat{\subsubsection}{\normalsize\bfseries}{\thesubsubsection.}{0.5em}{}
+
+\begin{document}
+
+% ============================================================================
+% CABECERA INSTITUCIONAL
+% ============================================================================
+\begin{center}
+  \renewcommand{\arraystretch}{1.3}
+  \begin{tabular}{|p{3.2cm}|p{4.3cm}|p{2.5cm}|p{2.2cm}|p{1.6cm}|p{1.8cm}|}
+    \hline
+    \rowcolor{tableHeader}
+    \textbf{DEPARTAMENTO:} & CIENCIAS DE LA COMPUTACIÓN & \textbf{CARRERA:} & \multicolumn{3}{l|}{INGENIERÍA EN SOFTWARE} \\
+    \hline
+    \textbf{ASIGNATURA:} & Aseguramiento de la Calidad de Software & \textbf{NRC:} & 36845 & \textbf{FECHA:} & 23/11/2026 \\
+    \hline
+    \textbf{DOCENTE:} & Ing. Diego Gamboa & \textbf{TALLER:} & ISO/IEC 29110 & \textbf{NOTA:} & \\
+    \hline
+  \end{tabular}
+\end{center}
+
+\vspace{0.3cm}
+
+\begin{center}
+  {\LARGE \textbf{\textcolor{mindsonBlue}{Guía Paso a Paso de Implementación del Perfil Básico ISO/IEC 29110 en un Caso Práctico Real}}}\\[0.2cm]
+  {\large \textbf{Proyecto: Plataforma de Gestión Académica y Financiera ``MindsOn''}}\\[0.3cm]
+  \textbf{Grupo 6:}\\
+  Andrea Katherine Raura Negrete $\cdot$ Zaith Alejandro Manangón Vinueza\\
+  Matías Ariel Lugmaña Conya $\cdot$ Alexander Francisco Villacrés Guerrero
+\end{center}
+
+\vspace{0.2cm}
+\tableofcontents
+\newpage
+
+% ============================================================================
+% SECCIÓN 1: SELECCIÓN DEL PERFIL Y ORGANIZACIÓN DE LA VSE
+% ============================================================================
+\section{Contextualización de la VSE y Selección del Perfil ISO/IEC 29110}
+
+\subsection{Justificación de la Entidad Muy Pequeña (VSE)}
+De acuerdo con la norma \textbf{ISO/IEC 29110-1-1:2024}, una Entidad Muy Pequeña (\textit{Very Small Entity}, VSE) es una empresa, organización, departamento o proyecto con un equipo de hasta \textbf{25 personas}. El equipo de desarrollo encargado del sistema \textbf{MindsOn} está conformado por \textbf{4 ingenieros en formación}, operando sobre un único proyecto activo cuyo dominio (gestión académica, control de horarios, facturación SRI y control de morosidad/egresos) no involucra software crítico para la vida humana ni seguridad nacional.
+
+En consecuencia, se selecciona el \textbf{Perfil Básico del Grupo de Perfiles Genérico de Ingeniería de Software (ISO/IEC TR 29110-5-1-2)}, complementado con las prácticas ágiles de la guía \textbf{ISO/IEC 29110-5-4:2025}, articulando los dos procesos fundamentales de la norma:
+\begin{enumerate}[noitemsep]
+  \item \textbf{Proceso de Gestión del Proyecto (GP):} Actividades \texttt{GP.1} (Planificación), \texttt{GP.2} (Ejecución del plan), \texttt{GP.3} (Evaluación y control) y \texttt{GP.4} (Cierre).
+  \item \textbf{Proceso de Implementación de Software (IS):} Actividades \texttt{IS.1} (Inicio), \texttt{IS.2} (Análisis de requisitos), \texttt{IS.3} (Arquitectura y diseño detallado), \texttt{IS.4} (Construcción), \texttt{IS.5} (Integración y pruebas) e \texttt{IS.6} (Entrega del producto).
+\end{enumerate}
+
+\subsection{Asignación de Roles del Perfil Básico}
+La norma establece que en una VSE una misma persona puede asumir múltiples roles según sus competencias. En la Tabla \ref{tab:roles} se formaliza la estructura organizativa del equipo y la contraparte del cliente.
+
+\begin{table}[h!]
+\centering
+\caption{Matriz de Roles y Responsabilidades según el Perfil Básico ISO/IEC 29110}
+\label{tab:roles}
+\renewcommand{\arraystretch}{1.25}
+\begin{tabular}{@{}p{1.2cm}p{3.4cm}p{4.3cm}p{6.8cm}@{}}
+\toprule
+\rowcolor{tableHeader}
+\textbf{Sigla} & \textbf{Rol ISO/IEC 29110} & \textbf{Responsable Asignado} & \textbf{Responsabilidades Principales en MindsOn} \\
+\midrule
+\textbf{CL} & Cliente & Administración MindsOn / Enlace: Zaith Manangón & Define necesidades operativas, revisa el Enunciado del Trabajo (\texttt{GP.1.1}), valida requisitos (\texttt{IS.2.4}), solicita cambios (\texttt{GP.3}) y firma el Acta de Aceptación (\texttt{GP.4}). \\
+\textbf{GP} & Gestor del Proyecto & Matías Ariel Lugmaña Conya & Elabora el Plan del Proyecto (\texttt{GP.1}), registra horas y métricas de retrabajo (\texttt{GP.2}), tramita solicitudes de cambio (\texttt{GP.3}) y dirige el cierre formal (\texttt{GP.4}). \\
+\textbf{LT} & Líder Técnico & Matías Ariel Lugmaña Conya & Define decisiones de arquitectura en Next.js 15, Prisma ORM y Supabase (\texttt{IS.3}), supervisa el control de versiones en Git y aprueba revisiones técnicas. \\
+\textbf{AN} & Analista & Andrea Katherine Raura Negrete & Levanta, especifica, verifica y conduce la validación de requisitos funcionales y no funcionales con el cliente (\texttt{IS.2}). \\
+\textbf{DIS} & Diseñador(a) & Andrea Raura / Alexander Villacrés & Diseña la arquitectura de componentes React 19, el esquema relacional en \texttt{schema.prisma} y la matriz de trazabilidad (\texttt{IS.3}). \\
+\textbf{PR} & Programador & Alexander Villacrés / Matías Lugmaña & Codifica los módulos en TypeScript (\texttt{src/actions/}, \texttt{src/lib/}, \texttt{src/app/api/}) y construye las pruebas unitarias automatizadas (\texttt{IS.4}). \\
+\textbf{ET} & Equipo de Trabajo / Pruebas & Zaith Manangón / Alexander Villacrés & Ejecuta pruebas unitarias (\texttt{npx tsx --test}), pruebas funcionales en Postman y pruebas de carga en Apache JMeter (\texttt{IS.5}). \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ============================================================================
+% SECCIÓN 2: SESIÓN 1 - ENUNCIADO DEL TRABAJO (GP.1.1)
+% ============================================================================
+\section{Actividad GP.1.1: Enunciado del Trabajo [Revisado]}
+
+\subsection{Identificación del Producto de Trabajo}
+\begin{itemize}[noitemsep]
+  \item \textbf{Código del Artefacto:} \texttt{MINDSON-SOW-2026-V1.1}
+  \item \textbf{Estado:} \textcolor{okGreen}{\textbf{[REVISADO Y APROBADO]}} (Tarea \texttt{GP.1.1} ejecutada por \texttt{GP} y \texttt{LT} junto con \texttt{CL}).
+\end{itemize}
+
+\subsection{Descripción del Trabajo y Alcance del Incremento}
+El Instituto de Inglés \textbf{MindsOn} (Quito, Ecuador) cuenta con una plataforma web en Next.js 15 conectada a PostgreSQL en Supabase para administrar estudiantes, docentes, aulas, libros, horarios, cobros de colegiaturas y egresos. Sin embargo, la auditoría de calidad identificó que la plataforma carecía de un mecanismo formal de autenticación, protección de endpoints de servidor (\textit{Server Actions}) y una interfaz HTTP REST estándar para pruebas de capacidad.
+
+El presente proyecto abarca la construcción, verificación, validación y entrega del \textbf{Incremento de Seguridad Institucional, Autenticación y Validación Regulatoria Ecuatoriana}, compuesto por:
+\begin{enumerate}[noitemsep]
+  \item \textbf{Portal de Autenticación (\texttt{/login}):} Interfaz institucional con validación de credenciales contra el modelo \texttt{AdminUser} en PostgreSQL, hashing criptográfico \texttt{SHA-256} con salt y opción de persistencia ``Recordarme'' (cookie HTTP-Only \texttt{mindson\_session} de 30 días o 12 horas).
+  \item \textbf{Protección Global de Rutas y Acciones:} Middleware en Edge Runtime (\texttt{src/middleware.ts}) y guardián de servidor \texttt{requireAuth()} (\texttt{src/lib/require-auth.ts}) inyectado en las \textbf{43 funciones exportadas} de los 7 módulos de \textit{Server Actions}.
+  \item \textbf{Endpoint HTTP REST de Autenticación (\texttt{POST /api/auth/login}):} Route Handler estándar para integración, pruebas funcionales en Postman y pruebas de carga en Apache JMeter.
+  \item \textbf{Validadores Regulatorios Ecuatorianos (\texttt{src/lib/ecuador-validators.ts}):} Validación de cédula de identidad por algoritmo Módulo 10 y normalización telefónica internacional (\texttt{+593}) para notificaciones por WhatsApp.
+\end{enumerate}
+
+\subsection{Registro de Revisión del Enunciado del Trabajo (GP.1.1)}
+\begin{table}[h!]
+\centering
+\caption{Evidencia de Revisión del Enunciado del Trabajo (GP.1.1)}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{@{}p{2.8cm}p{5.5cm}p{5.2cm}p{2.2cm}@{}}
+\toprule
+\rowcolor{tableHeader}
+\textbf{Criterio Revisado} & \textbf{Observación Detectada en Revisión Inicial} & \textbf{Corrección Aplicada en Versión Revisada} & \textbf{Conformidad} \\
+\midrule
+Claridad del alcance & No se especificaba qué ocurría si la tabla \texttt{admin\_users} estaba vacía en el primer despliegue. & Se incluyó la función de auto-aprovisionamiento seguro \texttt{ensureAdminUserExists()} con variables de entorno. & Aprobado (\texttt{CL, GP}) \\
+Entorno de despliegue & No se detallaba la restricción de base de datos viva en producción. & Se estableció como restricción obligatoria que todo cambio en Prisma sea 100\% aditivo sin \texttt{--force-reset}. & Aprobado (\texttt{LT, CL}) \\
+Criterios de aceptación & Faltaba definir el umbral de cobertura de Server Actions protegidas. & Se fijó meta del 100\% (43/43 funciones con \texttt{await requireAuth()}). & Aprobado (\texttt{GP, LT}) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ============================================================================
+% SECCIÓN 3: SESIÓN 1 - PLAN DEL PROYECTO E INSTRUCCIONES DE ENTREGA (GP.1)
+% ============================================================================
+\section{Actividad GP.1 / GP.1.2: Plan del Proyecto e Instrucciones de Entrega}
+
+\subsection{Planificación de Tareas y Cronograma (GP.1)}
+El proyecto se estructuró en dos iteraciones cortas (Sesión 1 y Sesión 2 + trabajo autónomo), alineando cada tarea con su actividad de la norma ISO/IEC 29110, rol responsable y esfuerzo estimado (Tabla \ref{tab:plan}).
+
+\begin{table}[h!]
+\centering
+\caption{Plan del Proyecto y Asignación de Esfuerzo por Actividad ISO/IEC 29110}
+\label{tab:plan}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{@{}p{1.4cm}p{6.0cm}p{1.6cm}p{2.8cm}p{1.6cm}p{2.0cm}@{}}
+\toprule
+\rowcolor{tableHeader}
+\textbf{Act. ISO} & \textbf{Tarea Planificada} & \textbf{Rol} & \textbf{Categoría de Hora} & \textbf{Horas Plan.} & \textbf{Estado} \\
+\midrule
+\texttt{GP.1.1} & Redactar y revisar el Enunciado del Trabajo con el cliente & GP, LT, CL & Prevención & 1.0 h & Completado \\
+\texttt{GP.1.2} & Elaborar el Plan del Proyecto y definir instrucciones de entrega & GP, CL & Prevención & 1.0 h & Completado \\
+\texttt{IS.1} & Revisar el plan con el equipo y configurar entorno Git/Supabase & LT, ET & Prevención & 0.5 h & Completado \\
+\texttt{IS.2} & Especificar, verificar y validar requisitos (\texttt{RF-01} a \texttt{RNF-04}) & AN, CL & Ejecución / Revisión & 1.5 h & Completado \\
+\texttt{IS.3} & Diseñar arquitectura JWT Edge, servicio cripto y trazabilidad & DIS, LT & Ejecución & 1.5 h & Completado \\
+\texttt{IS.4} & Construir módulos de autenticación, \texttt{requireAuth} (43 acciones) y API REST & PR & Ejecución & 3.5 h & Completado \\
+\texttt{IS.5} & Construir y ejecutar suite de 11 pruebas unitarias y plan JMeter & ET, PR & Revisión & 2.0 h & Completado \\
+\texttt{GP.3} & Corregir defectos detectados en build de Next.js 15 y Vercel & PR, LT & Corrección (Retrabajo) & 1.5 h & Completado \\
+\texttt{GP.3} & Evaluar y tramitar Solicitud de Cambio \texttt{SC-2026-001} & GP, LT, CL & Prevención / Control & 1.0 h & Completado \\
+\texttt{GP.4/IS.6} & Empaquetar Configuración de Software y firmar Acta de Aceptación & GP, CL & Revisión / Cierre & 1.0 h & Completado \\
+\midrule
+\multicolumn{4}{r}{\textbf{Esfuerzo Total del Ciclo:}} & \textbf{14.5 h} & \textbf{100\%} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Instrucciones de Entrega de los Entregables (GP.1.2)}
+En cumplimiento de la tarea \textbf{GP.1.2}, se acordaron con el Cliente (\texttt{CL}) las siguientes instrucciones formales de entrega para cada producto de trabajo que integra la \textbf{Configuración de Software}:
+
+\begin{table}[h!]
+\centering
+\caption{Instrucciones Formales de Entrega Pactadas con el Cliente (GP.1.2)}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{@{}p{4.0cm}p{4.3cm}p{4.2cm}p{3.0cm}@{}}
+\toprule
+\rowcolor{tableHeader}
+\textbf{Entregable} & \textbf{Formato y Ubicación en Repositorio} & \textbf{Mecanismo de Verificación Previa} & \textbf{Medio de Entrega al Cliente} \\
+\midrule
+Código Fuente del Incremento de Seguridad & Archivos TypeScript en \texttt{src/lib/}, \texttt{src/actions/}, \texttt{src/middleware.ts} y \texttt{src/app/api/auth/login/route.ts} & Compilación limpia mediante \texttt{npx tsc --noEmit} y \texttt{npm run build} (0 errores). & Rama principal \texttt{main} en GitHub + despliegue automático en Vercel. \\
+Suite de Pruebas Unitarias Automatizadas & Archivo \texttt{src/\_\_tests\_\_/iso29110-security-auth.test.ts} ejecutable con \texttt{npm test} & Ejecución del runner nativo con 11/11 pruebas aprobadas (100\% pass). & Repositorio Git + Log de consola adjunto en Sección \ref{sec:pruebas}. \\
+Plan de Pruebas de Carga JMeter & Archivos \texttt{Gestion\_MindsOn\_Plan.jmx} y \texttt{credentials.csv} en la raíz & Validación sintáctica XML con \texttt{ElementTree} y prueba sobre \texttt{localhost:3000}. & Raíz del repositorio Git del proyecto. \\
+Documentación Técnica y Manual de Contexto & Archivo \texttt{README.md} maestro y guía ISO/IEC 29110 en LaTeX (\texttt{.tex}) & Revisión de pares (\texttt{LT} y \texttt{AN}) contra lista de verificación del DP. & Repositorio Git + PDF compilado desde LaTeX. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Gestión de Riesgos del Proyecto (GP.1)}
+\begin{enumerate}[noitemsep]
+  \item \textbf{Riesgo R-01 (Crítico):} Pérdida de datos reales en Supabase durante cambios de esquema. \textit{Mitigación:} Prohibición estricta de \texttt{--force-reset}; uso exclusivo de migraciones aditivas.
+  \item \textbf{Riesgo R-02 (Alto):} Falla de compilación en Vercel por desincronización de tipos en \texttt{@prisma/client}. \textit{Mitigación:} Inclusión de \texttt{"postinstall": "prisma generate"} en \texttt{package.json}.
+  \item \textbf{Riesgo R-03 (Alto):} Fallo de empaquetado en Next.js 15 al exportar objetos o constantes en archivos con directiva \texttt{'use server'}. \textit{Mitigación:} Aislamiento de constantes y funciones criptográficas en \texttt{src/lib/auth-service.ts}.
+\end{enumerate}
+
+% ============================================================================
+% SECCIÓN 4: SESIÓN 1 - ESPECIFICACIÓN Y VALIDACIÓN DE REQUISITOS (IS.2)
+% ============================================================================
+\section{Actividad IS.2: Especificación, Verificación y Validación de Requisitos}
+
+\subsection{Catálogo de Requisitos Especificados [Validados]}
+En la Tabla \ref{tab:requisitos} se detallan los requisitos funcionales (\texttt{RF}) y no funcionales (\texttt{RNF}) especificados por la Analista (\texttt{AN}), verificados por el Líder Técnico (\texttt{LT}) y validados por el Cliente (\texttt{CL}).
+
+\begin{table}[h!]
+\centering
+\caption{Especificación de Requisitos de Software [Validada] (IS.2)}
+\label{tab:requisitos}
+\renewcommand{\arraystretch}{1.25}
+\begin{tabular}{@{}p{1.5cm}p{2.2cm}p{7.8cm}p{4.0cm}@{}}
+\toprule
+\rowcolor{tableHeader}
+\textbf{ID} & \textbf{Tipo / Prior.} & \textbf{Descripción del Requisito} & \textbf{Criterio de Aceptación Medible} \\
+\midrule
+\textbf{RF-01} & Funcional (Alta - P0) & El sistema debe autenticar a los administradores mediante correo y contraseña contra la tabla \texttt{admin\_users}, verificando el hash \texttt{SHA-256} con salt institucional y rechazando cualquier comparación en texto plano. & Login exitoso con credenciales válidas; rechazo \texttt{401} ante clave errónea o intento de texto plano. \\
+\textbf{RF-02} & Funcional (Alta - P0) & El sistema debe emitir un token JWT firmado (\texttt{HS256}) almacenado en una cookie HTTP-Only (\texttt{mindson\_session}) con vigencia de 30 días si se activa ``Recordarme'' o 12 horas en caso contrario. & Cookie presente con flags \texttt{HttpOnly}, \texttt{SameSite=Lax}; decodificación válida del payload. \\
+\textbf{RF-03} & Funcional (Alta - P0) & El middleware y el validador de tokens deben rechazar cualquier sesión cuyo JWT sea inválido, haya expirado o contenga campos \texttt{id} o \texttt{email} vacíos (prevención de bypass por objeto \textit{truthy}). & \texttt{verifySessionToken} retorna \texttt{null} si \texttt{id === ""} o \texttt{email === ""}; redirección automática a \texttt{/login}. \\
+\textbf{RF-04} & Funcional (Alta - P0) & El 100\% de las \textit{Server Actions} de negocio (43 funciones en 7 módulos) deben verificar la sesión activa mediante \texttt{await requireAuth()} antes de ejecutar consultas o mutaciones en Prisma. & 43/43 funciones exportadas invocan \texttt{requireAuth()} en su primera línea; rechazo con error \texttt{NO\_AUTH} sin sesión. \\
+\textbf{RF-05} & Funcional (Media - P1) & El sistema debe exponer el endpoint HTTP REST \texttt{POST /api/auth/login} que valide credenciales con Prisma y devuelva JSON con código \texttt{200} (token + usuario), \texttt{400} (datos faltantes) o \texttt{401} (no autorizado). & Respuestas JSON conformes en Postman y ejecución de carga en Apache JMeter sin redirección 307 del middleware. \\
+\textbf{RF-06} & Funcional (Media - P1) & El sistema debe validar cédulas de identidad ecuatorianas mediante el algoritmo Módulo 10 y normalizar teléfonos móviles al formato internacional \texttt{5939XXXXXXXX} para enlaces de WhatsApp. & Cédulas válidas aprobadas; dígitos verificadores o provincias inválidas rechazadas; URL \texttt{wa.me/593...} generada. \\
+\textbf{RNF-01} & No Func. (Seguridad) & Las credenciales de auto-aprovisionamiento y la clave secreta JWT deben leerse desde variables de entorno (\texttt{ADMIN\_EMAIL}, \texttt{ADMIN\_PASSWORD}, \texttt{JWT\_SECRET}) con inicialización \textit{lazy} que no bloquee \texttt{next build}. & \texttt{npm run build} finaliza con código \texttt{0} tanto en entorno local como en Vercel. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Resultado de Verificación y Validación con el Cliente (IS.2.4)}
+\begin{itemize}[noitemsep]
+  \item \textbf{Verificación Técnica (\texttt{AN, LT}):} Se comprobó que ningún requisito fuera ambiguo, contradictorio o imposible de probar unitariamente.
+  \item \textbf{Hallazgo durante la Validación con el Cliente (\texttt{IS.2.4}):} En la primera revisión del prototipo de login, el Cliente (\texttt{CL}) observó que al cerrar el navegador debía volver a digitar su correo institucional cada vez.
+  \item \textbf{Corrección Aplicada antes de la Aprobación:} Se incorporó persistencia del correo en \texttt{localStorage} vinculada a la casilla ``Recordarme'' en \texttt{src/app/login/page.tsx} y un botón de visibilidad de contraseña (\texttt{Eye/EyeOff}), además del botón ``Salir'' en la cabecera (\texttt{Header.tsx}).
+  \item \textbf{Resultado Final de Validación:} \textcolor{okGreen}{\textbf{APROBADO POR EL CLIENTE}} el 23/11/2026.
+\end{itemize}
+
+% ============================================================================
+% SECCIÓN 5: SESIÓN 2 - ARQUITECTURA, CONSTRUCCIÓN Y PRUEBAS (IS.3, IS.4, IS.5)
+% ============================================================================
+\section{Actividades IS.3, IS.4 e IS.5: Diseño, Construcción y Pruebas Unitarias}
+
+\subsection{Arquitectura y Matriz de Trazabilidad Bidireccional (IS.3)}
+Para garantizar que cada requisito validado en \texttt{IS.2} esté implementado en el código fuente (\texttt{IS.4}) y cubierto por al menos un caso de prueba automatizado (\texttt{IS.5}), se construyó la Matriz de Trazabilidad de la Tabla \ref{tab:trazabilidad}.
+
+\begin{table}[h!]
+\centering
+\caption{Matriz de Trazabilidad Bidireccional (IS.3 $\leftrightarrow$ IS.4 $\leftrightarrow$ IS.5)}
+\label{tab:trazabilidad}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{@{}p{1.6cm}p{5.8cm}p{5.0cm}p{3.0cm}@{}}
+\toprule
+\rowcolor{tableHeader}
+\textbf{Requisito} & \textbf{Componente / Archivo Construido (IS.4)} & \textbf{Función / Método Principal} & \textbf{Casos de Prueba (IS.5)} \\
+\midrule
+\textbf{RF-01} & \texttt{src/lib/auth-service.ts} & \texttt{hashPassword()}, \texttt{verifyPassword()} & \texttt{UT-01, UT-02, UT-03} \\
+\textbf{RF-02} & \texttt{src/lib/auth-token.ts} & \texttt{createSessionToken()} & \texttt{UT-04} \\
+\textbf{RF-03} & \texttt{src/lib/auth-token.ts}, \texttt{src/middleware.ts} & \texttt{verifySessionToken()}, \texttt{middleware()} & \texttt{UT-05, UT-06} \\
+\textbf{RF-04} & \texttt{src/lib/require-auth.ts}, \texttt{src/actions/*.ts} & \texttt{requireAuth()} en 43 acciones & Verificación estática (43/43) \\
+\textbf{RF-05} & \texttt{src/app/api/auth/login/route.ts} & \texttt{GET()}, \texttt{POST()}, \texttt{OPTIONS()} & \texttt{UT-07, UT-08, UT-09} \\
+\textbf{RF-06} & \texttt{src/lib/ecuador-validators.ts} & \texttt{validateEcuadorianId()}, \texttt{buildWhatsAppUrl()} & \texttt{UT-10, UT-11} \\
+\textbf{RNF-01} & \texttt{src/lib/auth-token.ts}, \texttt{package.json} & \texttt{getSecret()} (lazy init) & Build de producción Next.js 15 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Evidencia de Construcción del Incremento en el Repositorio (IS.4)}
+A continuación se presenta el fragmento nuclear de los componentes construidos y versionados en el repositorio del proyecto:
+
+\begin{lstlisting}[caption={Guardián de Autorización \texttt{src/lib/require-auth.ts} y Validación Estricta JWT en \texttt{src/lib/auth-token.ts}}]
+// src/lib/require-auth.ts
+export async function requireAuth(): Promise<SessionPayload> {
+  const cookieStore = await cookies();
+  const token = cookieStore.get(SESSION_COOKIE_NAME)?.value;
+  if (!token) {
+    throw new Error('NO_AUTH: Sesion no encontrada. Inicia sesion para continuar.');
+  }
+  const session = await verifySessionToken(token);
+  if (!session) {
+    throw new Error('NO_AUTH: Sesion invalida o expirada. Inicia sesion nuevamente.');
+  }
+  return session;
+}
+
+// src/lib/auth-token.ts (Mitigacion de bypass truthy)
+export async function verifySessionToken(token: string): Promise<SessionPayload | null> {
+  try {
+    const { payload } = await jwtVerify(token, getSecret());
+    if (!payload || typeof payload !== 'object') return null;
+    const id = String(payload.id || '');
+    const email = String(payload.email || '');
+    const name = String(payload.name || '');
+    const role = String(payload.role || '');
+    if (!id || !email) return null; // Rechaza tokens con campos vacios
+    return { id, email, name, role: role || 'ADMIN' };
+  } catch {
+    return null;
+  }
+}
+\end{lstlisting}
+
+\subsection{Informe de Pruebas Unitarias y de Integración (IS.5)}
+\label{sec:pruebas}
+Se implementó la suite automatizada en \texttt{src/\_\_tests\_\_/iso29110-security-auth.test.ts} utilizando el corredor nativo \texttt{node:test} y aserciones estrictas \texttt{node:assert/strict}, vinculada al comando \texttt{npm test} en \texttt{package.json}. La salida real obtenida al ejecutar las pruebas en el repositorio es la siguiente:
+
+\begin{lstlisting}[caption={Salida Real de Ejecución de Pruebas Unitarias (\texttt{npx tsx --test src/\_\_tests\_\_/iso29110-security-auth.test.ts})}]
+> ISO/IEC 29110 - IS.4 & IS.5: Suite de Pruebas Unitarias y de Integracion (MindsOn)
+  > 1. Servicio Criptografico de Contraseñas (src/lib/auth-service.ts)
+    [OK] UT-01: hashPassword genera un digest SHA-256 hexadecimal deterministico de 64 caracteres con salt (267.33ms)
+    [OK] UT-02: verifyPassword valida exitosamente una contraseña legitima contra su hash con salt (20.85ms)
+    [OK] UT-03: verifyPassword rechaza contraseñas incorrectas y bloquea comparacion en texto plano (5.22ms)
+  > 2. Gestion de Tokens JWT y Prevencion de Bypass (src/lib/auth-token.ts)
+    [OK] UT-04: createSessionToken y verifySessionToken firman y verifican un payload administrativo valido (25.50ms)
+    [OK] UT-05: verifySessionToken retorna null ante un token JWT adulterado o invalido (1.49ms)
+    [OK] UT-06: verifySessionToken rechaza payloads con id o email vacios (mitigacion de bypass truthy) (17.11ms)
+  > 3. Endpoint HTTP REST de Autenticacion (src/app/api/auth/login/route.ts)
+    [OK] UT-07: GET /api/auth/login responde 200 OK con metadatos de estado activo (17.71ms)
+    [OK] UT-08: POST /api/auth/login rechaza JSON malformado con estado 400 Bad Request (9.74ms)
+    [OK] UT-09: POST /api/auth/login rechaza peticiones sin email o sin password con estado 400 (5.96ms)
+  > 4. Validadores Regulatorios Ecuatorianos (src/lib/ecuador-validators.ts)
+    [OK] UT-10: validateEcuadorianId valida cedulas ecuatorianas por Modulo 10 y rechaza digito verificador erroneo (3.35ms)
+    [OK] UT-11: validateEcuadorianPhone y buildWhatsAppUrl normalizan telefonos al prefijo +593 (1.61ms)
+[i] tests 11 | suites 5 | pass 11 | fail 0 | skipped 0 | duration_ms 387.55ms
+\end{lstlisting}
+
+Adicionalmente, se verificó mediante inspección automatizada que las \textbf{43 funciones exportadas} en los 7 archivos de \texttt{src/actions/} (\texttt{academic.ts}: 10, \texttt{finance.ts}: 8, \texttt{expenses.ts}: 9, \texttt{teachers.ts}: 4, \texttt{classrooms.ts}: 4, \texttt{books.ts}: 5, \texttt{schedule.ts}: 3) contienen la llamada \texttt{await requireAuth()}.
+
+% ============================================================================
+% SECCIÓN 6: SESIÓN 2 - SOLICITUD DE CAMBIO (GP.3)
+% ============================================================================
+\section{Actividad GP.3: Tramitación de Solicitud de Cambio}
+
+Durante la ejecución y control del proyecto (\texttt{GP.3}), el Cliente y el equipo de auditoría detectaron una vulnerabilidad de integridad contable en el registro del método de pago de las colegiaturas. Siguiendo la estructura del producto de trabajo \textbf{Solicitud de Cambio} definida en la norma ISO/IEC 29110, se documentó, evaluó y aprobó la solicitud en la Tabla \ref{tab:cambio}.
+
+\begin{table}[h!]
+\centering
+\caption{Formulario Formal de Solicitud de Cambio (GP.3) -- \texttt{SC-2026-001}}
+\label{tab:cambio}
+\renewcommand{\arraystretch}{1.25}
+\begin{tabular}{@{}p{4.2cm}p{11.3cm}@{}}
+\toprule
+\rowcolor{tableHeader}
+\textbf{Campo Normativo ISO 29110} & \textbf{Detalle de la Solicitud de Cambio} \\
+\midrule
+\textbf{ID y Fecha de Solicitud} & \texttt{SC-2026-001} $\cdot$ Fecha: 23/11/2026 \\
+\textbf{Origen y Solicitante} & Cliente (\texttt{CL} -- Administración Financiera MindsOn) y Equipo de Calidad (\texttt{AN/LT}) \\
+\textbf{Estado de la Solicitud} & \textcolor{okGreen}{\textbf{ACEPTADA}} (Recorrió los estados: \textit{Propuesta} $\rightarrow$ \textit{Evaluada} $\rightarrow$ \textit{Aceptada}) \\
+\textbf{Criticidad y Fecha Req.} & \textbf{Alta (P1 -- Integridad Contable)} $\cdot$ Programada para el Incremento 2 \\
+\textbf{Propósito del Cambio} & Corregir el almacenamiento no estructurado del método de pago en los cobros de colegiaturas. Actualmente, el modal \texttt{PaymentModal.tsx} concatena el método entre corchetes dentro del campo de texto libre \texttt{notes} (ej. \texttt{"[Transferencia Bancaria / QR] Comprobante 123"}) y \texttt{src/actions/finance.ts} lo extrae con la expresión regular \texttt{/\[(.*?)\]/}. Si el usuario escribe corchetes en la nota, el reporte de cobranza se corrompe. \\
+\textbf{Sistemas / Archivos Afectados} & 1) \texttt{prisma/schema.prisma} (modelo \texttt{Payment}, líneas 312--330). \newline
+2) Tabla PostgreSQL \texttt{payments} en Supabase (migración SQL). \newline
+3) \texttt{src/components/PaymentModal.tsx} (líneas 41, 65 y 244--259). \newline
+4) \texttt{src/actions/finance.ts} (\texttt{registerPaymentAction}, \texttt{getPaymentReceiptDataAction} y \texttt{getMonthlyCollectionHistoryAction}). \\
+\textbf{Impacto en la Operación Existente} & \textbf{Bajo riesgo operativo si se ejecuta de forma aditiva:} El enum \texttt{PaymentMethod} (\texttt{CASH, TRANSFER, CARD, DEPOSIT}) ya existe en \texttt{schema.prisma} (líneas 70--75). Agregar la columna \texttt{paymentMethod PaymentMethod @default(TRANSFER)} con un script SQL \texttt{UPDATE "payments"} preserva el 100\% de los pagos históricos sin tiempo de inactividad (\textit{zero-downtime}). \\
+\textbf{Impacto en Documentación} & Actualización del diagrama Entidad-Relación en \texttt{README.md}, especificación de requisitos (\texttt{RF-07}) y casos de prueba unitarios del módulo financiero. \\
+\textbf{Estimación y Decisión} & Esfuerzo estimado: \textbf{4.0 horas}. \textbf{Decisión (\texttt{GP, LT, CL}):} Se aprueba su incorporación al Plan del Proyecto para ejecutarse inmediatamente al cierre del Incremento 1 de Seguridad. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ============================================================================
+% SECCIÓN 7: SESIÓN 2 - MÉTRICAS DE ESFUERZO Y % DE RETRABAJO (GP.2 / GP.3)
+% ============================================================================
+\section{Actividades GP.2 y GP.3: Reporte de Avance, Registro de Horas y \% de Retrabajo}
+
+\subsection{Clasificación del Esfuerzo por Categoría de Calidad}
+Siguiendo el modelo de medición de esfuerzo de la norma ISO/IEC 29110 (aplicado en casos certificados como \textit{BitPerfect} en Perú), las horas reales invertidas por el equipo se registraron en cuatro categorías: \textbf{Prevención}, \textbf{Ejecución}, \textbf{Revisión} y \textbf{Corrección de Defectos (Retrabajo)} (Tabla \ref{tab:metricas}).
+
+\begin{table}[h!]
+\centering
+\caption{Registro de Horas Reales por Categoría e Integrante}
+\label{tab:metricas}
+\renewcommand{\arraystretch}{1.25}
+\begin{tabular}{@{}p{4.6cm}p{1.9cm}p{1.9cm}p{1.9cm}p{2.2cm}p{1.9cm}@{}}
+\toprule
+\rowcolor{tableHeader}
+\textbf{Integrante / Rol} & \textbf{Prevención} & \textbf{Ejecución} & \textbf{Revisión} & \textbf{Corrección (Retrabajo)} & \textbf{Total Horas} \\
+\midrule
+Matías Ariel Lugmaña (\texttt{GP, LT, PR}) & 1.25 h & 1.75 h & 0.75 h & 0.50 h & \textbf{4.25 h} \\
+Andrea Katherine Raura (\texttt{AN, DIS}) & 0.75 h & 1.50 h & 1.00 h & 0.25 h & \textbf{3.50 h} \\
+Alexander Francisco Villacrés (\texttt{DIS, PR, ET}) & 0.75 h & 1.75 h & 0.75 h & 0.50 h & \textbf{3.75 h} \\
+Zaith Alejandro Manangón (\texttt{ET, CL}) & 0.75 h & 1.00 h & 1.00 h & 0.25 h & \textbf{3.00 h} \\
+\midrule
+\rowcolor{slateBg}
+\textbf{Total por Categoría (Horas)} & \textbf{3.5 h} & \textbf{6.0 h} & \textbf{3.5 h} & \textbf{1.5 h} & \textbf{14.5 h} \\
+\textbf{Porcentaje sobre el Total} & \textbf{24.14\%} & \textbf{41.38\%} & \textbf{24.14\%} & \textbf{10.34\%} & \textbf{100.0\%} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Cálculo y Análisis Técnico del Porcentaje de Retrabajo}
+El porcentaje de retrabajo mide la proporción del tiempo total destinada a corregir defectos evitables:
+\[
+  \text{Porcentaje de Retrabajo} = \left( \frac{\text{Horas de Corrección de Defectos}}{\text{Horas Totales del Proyecto}} \right) \times 100 = \left( \frac{1.5\text{ h}}{14.5\text{ h}} \right) \times 100 = \mathbf{10.34\%}
+\]
+
+\textbf{Desglose de las 1.5 horas de retrabajo registradas en MindsOn:}
+\begin{enumerate}[noitemsep]
+  \item \textbf{Defecto D-01 (0.5 h):} Error 500 en \texttt{POST /login} (\textit{``A use server file can only export async functions, found object''}) causado por exportar la constante \texttt{MASTER\_ADMIN} dentro de \texttt{src/actions/auth.ts}. Se corrigió moviendo las funciones y constantes auxiliares a \texttt{src/lib/auth-service.ts}.
+  \item \textbf{Defecto D-02 (0.5 h):} Error de tipos en el despliegue de Vercel (\textit{``bookRef does not exist in type ClassInclude''}) debido a que Vercel no ejecutaba \texttt{prisma generate}. Se corrigió añadiendo \texttt{"postinstall": "prisma generate"} en \texttt{package.json}.
+  \item \textbf{Defecto D-03 (0.5 h):} Falla durante \texttt{next build} cuando \texttt{JWT\_SECRET} se evaluaba de forma ansiosa (\textit{eager}) al importar el módulo con \texttt{NODE\_ENV=production}. Se corrigió implementando inicialización perezosa (\textit{lazy}) en \texttt{getSecret()}.
+\end{enumerate}
+
+\textbf{Interpretación frente a estándares internacionales:} Mientras que en la industria sin procesos estandarizados el retrabajo consume entre el \textbf{40\% y el 50\%} del esfuerzo total (Charette, 2005) y en los primeros proyectos certificados bajo ISO/IEC 29110 ronda el \textbf{18\%} (caso \textit{BitPerfect}, García, 2015), la inversión temprana en \textbf{Prevención (24.14\%)} y \textbf{Revisión (24.14\%)} permitió a nuestro equipo mantener el retrabajo en un \textbf{10.34\%}, evitando cualquier incidente sobre la base de datos de producción en Supabase.
+
+% ============================================================================
+% SECCIÓN 8: SESIÓN 2 - CIERRE, ACTA DE ACEPTACIÓN Y AUTOEVALUACIÓN (GP.4 / IS.6)
+% ============================================================================
+\section{Actividades GP.4 e IS.6: Cierre del Proyecto, Acta de Aceptación y Autoevaluación}
+
+\subsection{Acta de Aceptación del Producto de Software (GP.4 / IS.6)}
+\begin{table}[h!]
+\centering
+\caption{Acta Formal de Entrega y Aceptación del Incremento (\texttt{MINDSON-ACTA-2026-01})}
+\renewcommand{\arraystretch}{1.25}
+\begin{tabular}{@{}p{4.0cm}p{11.5cm}@{}}
+\toprule
+\rowcolor{tableHeader}
+\textbf{Elemento del Acta} & \textbf{Declaración Formal} \\
+\midrule
+\textbf{Proyecto / Incremento} & Plataforma MindsOn -- Incremento 1: Seguridad Institucional, Autenticación JWT, Protección de 43 Server Actions, API REST y Suite de Pruebas Unitarias. \\
+\textbf{Configuración de Software Entregada (IS.6)} & 1) Código fuente en rama \texttt{main} (\texttt{src/lib/auth-token.ts}, \texttt{src/lib/auth-service.ts}, \texttt{src/lib/require-auth.ts}, \texttt{src/middleware.ts}, \texttt{src/actions/*.ts}, \texttt{src/app/api/auth/login/route.ts}). \newline
+2) Suite de 11 pruebas unitarias (\texttt{src/\_\_tests\_\_/iso29110-security-auth.test.ts}). \newline
+3) Plan de carga JMeter (\texttt{Gestion\_MindsOn\_Plan.jmx} y \texttt{credentials.csv}). \newline
+4) Documentación integral de arquitectura y mantenimiento (\texttt{README.md}). \\
+\textbf{Verificación de Criterios} & Todos los requisitos (\texttt{RF-01} a \texttt{RNF-01}) cumplen sus criterios de aceptación con 11/11 pruebas unitarias exitosas y compilación de producción verificada. \\
+\textbf{Declaración de Aceptación} & El Cliente (\texttt{CL}) declara recibir a satisfacción la Configuración de Software descrita y aprueba el cierre formal del Incremento 1 conforme a la actividad \texttt{GP.4}. \\
+\textbf{Firmas de Conformidad} & \textbf{Por la VSE (Gestor del Proyecto - GP / LT):} Matías Ariel Lugmaña Conya \newline
+\textbf{Por el Cliente (Representante MindsOn - CL / ET):} Zaith Alejandro Manangón Vinueza \newline
+\textbf{Por Análisis y Diseño (Analista - AN / DIS):} Andrea Katherine Raura Negrete \newline
+\textbf{Por Construcción y Pruebas (Programador - PR / DIS):} Alexander Francisco Villacrés Guerrero \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Autoevaluación de Conformidad con el Paquete de Despliegue (DP)}
+Se evaluó el cumplimiento de las 10 actividades del Perfil Básico de ISO/IEC 29110 mediante la lista de verificación de los Paquetes de Despliegue (Tabla \ref{tab:autoeval}).
+
+\begin{table}[h!]
+\centering
+\caption{Autoevaluación del Equipo frente al Perfil Básico ISO/IEC 29110}
+\label{tab:autoeval}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{@{}p{1.6cm}p{5.2cm}p{6.5cm}p{2.0cm}@{}}
+\toprule
+\rowcolor{tableHeader}
+\textbf{Código} & \textbf{Actividad del Perfil Básico} & \textbf{Evidencia Generada en el Proyecto MindsOn} & \textbf{Cumplimiento} \\
+\midrule
+\texttt{GP.1} & Planificación del proyecto & Enunciado del Trabajo revisado (\texttt{GP.1.1}), Plan del Proyecto, matriz de riesgos e instrucciones de entrega (\texttt{GP.1.2}). & \textbf{100\%} \\
+\texttt{GP.2} & Ejecución del plan del proyecto & Registro de horas por integrante y categoría, control de versiones en Git y respaldos de configuración. & \textbf{100\%} \\
+\texttt{GP.3} & Evaluación y control del proyecto & Análisis del 10.34\% de retrabajo, acciones correctivas de build y Solicitud de Cambio \texttt{SC-2026-001} evaluada y aceptada. & \textbf{100\%} \\
+\texttt{GP.4} & Cierre del proyecto & Acta de Aceptación firmada (\texttt{MINDSON-ACTA-2026-01}) y archivo de configuración verificada. & \textbf{100\%} \\
+\texttt{IS.1} & Inicio de la implementación & Revisión del plan con el equipo y configuración del entorno local y variables \texttt{.env}. & \textbf{100\%} \\
+\texttt{IS.2} & Análisis de requisitos & Catálogo \texttt{RF-01} a \texttt{RNF-01} verificado y validado con el cliente (\texttt{IS.2.4}). & \textbf{100\%} \\
+\texttt{IS.3} & Arquitectura y diseño detallado & Diseño modular de autenticación y Matriz de Trazabilidad Bidireccional (Tabla \ref{tab:trazabilidad}). & \textbf{100\%} \\
+\texttt{IS.4} & Construcción de software & Componentes TypeScript implementados y 43 Server Actions protegidas con \texttt{requireAuth()}. & \textbf{100\%} \\
+\texttt{IS.5} & Integración y pruebas & Suite de 11 pruebas unitarias (\texttt{11 pass, 0 fail}) + Plan de carga Apache JMeter (\texttt{.jmx}). & \textbf{100\%} \\
+\texttt{IS.6} & Entrega del producto & Despliegue funcional y documento maestro \texttt{README.md} de mantenimiento y traspaso. & \textbf{100\%} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ============================================================================
+% SECCIÓN 9: PREGUNTAS DE REFLEXIÓN CRÍTICA
+% ============================================================================
+\section{Preguntas de Reflexión y Lecciones Aprendidas}
+
+\subsection{¿Qué tarea de la norma ISO/IEC 29110 aportó más valor al proyecto y por qué?}
+La actividad que aportó mayor valor tangible fue la combinación de \textbf{Diseño y Trazabilidad Bidireccional (\texttt{IS.3}) junto con la Verificación e Integración de Pruebas Unitarias (\texttt{IS.4 / IS.5})} y el \textbf{Control de Cambios (\texttt{GP.3})}:
+\begin{itemize}[noitemsep]
+  \item \textbf{Prevención de vulnerabilidades silenciosas:} Al vincular el requisito \texttt{RF-03} con el caso de prueba unitario \texttt{UT-06}, confirmamos empíricamente que un token malformado con strings vacíos \texttt{\{ id: "", email: "" \}} era evaluado como \textit{truthy} en JavaScript y burlaba el middleware. La trazabilidad obligó a probar ese borde exacto y erradicar el fallo.
+  \item \textbf{Cobertura verificable del 100\% de Server Actions:} En Next.js 15 es muy fácil proteger la interfaz visual y olvidar que cada \texttt{export async function} en un archivo \texttt{'use server'} es un endpoint HTTP POST público. La disciplina de verificación de \texttt{IS.4/IS.5} nos llevó a auditar y proteger las \textbf{43 funciones} en los 7 módulos del sistema.
+  \item \textbf{Protección de la línea base mediante \texttt{GP.3}:} Tramitar el problema del método de pago en \texttt{notes} como una \textbf{Solicitud de Cambio formal (\texttt{SC-2026-001})} evitó mezclar cambios de esquema financiero con el despliegue urgente de seguridad, manteniendo el proyecto ordenado y sin regresiones en la base de datos de producción.
+\end{itemize}
+
+\subsection{¿Qué producto de trabajo pareció más burocrático y cómo lo simplificarían sin perder evidencia?}
+El producto que inicialmente se percibió como más burocrático fue mantener por separado el \textbf{Enunciado del Trabajo Revisado (\texttt{GP.1.1})}, el \textbf{Plan del Proyecto con Instrucciones de Entrega (\texttt{GP.1.2})} y las \textbf{Actas de Validación/Aceptación (\texttt{IS.2.4 / GP.4})} como documentos extensos independientes para un equipo pequeño de 4 personas.
+
+\textbf{Propuesta de simplificación ágil (alineada con ISO/IEC 29110-5-4:2025) sin perder evidencia de auditoría:}
+\begin{enumerate}[noitemsep]
+  \item \textbf{Adoptar ``Docs-as-Code'' en el propio repositorio Git:} En lugar de redactar múltiples archivos Word o PDFs aislados que quedan desactualizados, integrar las plantillas del Paquete de Despliegue como artefactos vivos dentro de Git:
+  \begin{itemize}[noitemsep]
+    \item \textit{Solicitudes de Cambio (\texttt{GP.3}):} Gestionarlas mediante una plantilla estructurada de \textbf{GitHub Issues / Pull Request Template} que contenga obligatoriamente los campos normativos (Origen, Propósito, Archivos afectados, Impacto en BD y Aprobación del Cliente). El historial de aprobación del PR constituye evidencia inmutable con marca de tiempo y autor.
+    \item \textit{Matriz de Trazabilidad e Informe de Pruebas (\texttt{IS.3 / IS.5}):} Automatizar la nomenclatura de los bloques \texttt{describe()} e \texttt{it('UT-01 [RF-01]: ...')} en el archivo de pruebas unitarias para que la salida de \texttt{npm test} en GitHub Actions genere automáticamente el informe de verificación y trazabilidad en cada \textit{commit}.
+    \item \textit{Registro de Horas y Retrabajo (\texttt{GP.2 / GP.3}):} Etiquetar los commits con prefijos convencionales (\texttt{feat:} $\rightarrow$ Ejecución, \texttt{docs:/chore:} $\rightarrow$ Prevención, \texttt{test:} $\rightarrow$ Revisión, \texttt{fix:} $\rightarrow$ Corrección/Retrabajo) acompañados del tiempo invertido, permitiendo calcular el \% de retrabajo con un script automático al cierre de cada sprint.
+  \end{itemize}
+\end{enumerate}
+
+\end{document}

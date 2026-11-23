@@ -14,7 +14,6 @@
 # testing
 /coverage
 *.jtl
-/Gestion_MindsOn_Plan.jmx
 /credentials.csv
 /jmeter.log
 /reporte_dashboard_html/
